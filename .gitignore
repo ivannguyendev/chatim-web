@@ -147,3 +147,11 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# OS files
+.DS_Store
+
+# Transient inputs and agent plans (never commit)
+.local/
+.claude/plans/
+.agent/plans/
