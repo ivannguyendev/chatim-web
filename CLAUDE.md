@@ -25,12 +25,14 @@ Input material (PRDs, captures, API docs) is **transient** and can be deleted an
 
 ## Repo Memory
 
-`.memory/` is the shared, tracked memory for all agents (context, decisions and the *why* behind rules). Read `.memory/MEMORY.md` at the start of every session.
+`.memory/` is the shared, tracked memory for all agents (the *why* behind rules and decisions). Read `.memory/MEMORY.md` at the start of every session.
 
-- Strictly gated: never write or modify `.memory/` silently. Memories are written only at task Close-out after presenting the draft to the user and receiving explicit approval.
-- Content rules: store only confirmed user decisions and the *why* (rationale); never store agent assumptions, hypotheses, transient plans, or code snippets. One fact per file, frontmatter `name/description/metadata.type`, indexed in `.memory/MEMORY.md`; update an existing file instead of duplicating.
+- **Gate:** any create, update or delete in `.memory/` (including `MEMORY.md`) needs the user's approval of the exact draft (file name + full content, or the file to delete). A reply to another or bundled question, a general "ok", or silence is not approval.
+- **When:** only at task Close-out.
+- **Criteria:** write a memory only if all hold: confirmed by the user; still true after the task ends; not already in CLAUDE.md, `docs/`, code or git history; future agents would act differently without it. Never store assumptions, proposals, open questions, status or code.
+- **Where else:** rules → CLAUDE.md; requirements → `docs/`; phase scope/status → `docs/plans/*-summary.md`; working drafts → `<agent dir>/plans/` (local, not shared).
+- **Format:** one fact per file, frontmatter `name/description/metadata.type`, indexed in `.memory/MEMORY.md`; update an existing file instead of duplicating. Never store secrets or links to transient input files (`.local/`).
 - Rules belong in this file; `.memory/` explains them and must not copy CLAUDE.md content.
-- Never store secrets or links to transient input files (`.local/`).
 
 ## Architecture (planned)
 
