@@ -34,7 +34,7 @@ Mọi việc lớn theo workflow trong [CLAUDE.md](CLAUDE.md): brainstorm → l�
 ```
 packages/sdk/   SDK (transport, auth, reconnect, code sinh từ proto)
 apps/web/       Web app React
-docs/           Tài liệu đã chốt, tóm tắt plan từng phase (docs/plans/)
+docs/           Tài liệu đã chốt, tóm tắt plan từng phase (docs/plans/), quyết định đã chốt (docs/decisions/)
 .memory/        Bộ nhớ chung cho agent
 INDEXES.csv     Chỉ mục tra cứu codebase
 CLAUDE.md       Quy ước cho agent
