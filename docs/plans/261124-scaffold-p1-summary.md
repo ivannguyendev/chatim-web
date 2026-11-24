@@ -2,7 +2,7 @@
 
 **Mã tài liệu:** `261124-scaffold-p1-summary`  
 **Ngày lập:** 2026-11-24  
-**Trạng thái:** Chờ Duyệt (Draft)  
+**Trạng thái:** Đã Hoàn thành (Actual Build)  
 **Phạm vi:** Phase 1 trong chuỗi phát triển `chatim-web`.
 
 ---
