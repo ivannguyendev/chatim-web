@@ -24,15 +24,39 @@ export interface ChatMessageView {
 const MAX_SAFE_SEQ = BigInt(Number.MAX_SAFE_INTEGER);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasAsciiControlOrSpace(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function isSafeHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;
   }
-  const trimmed = value.trim();
-  return trimmed.startsWith("https://") || trimmed.startsWith("http://");
+  if (
+    value.length === 0 ||
+    value !== value.trim() ||
+    hasAsciiControlOrSpace(value)
+  ) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 function parseSeq(raw: unknown): number | null {
@@ -59,13 +83,21 @@ export function parseTimestampMs(raw: unknown): number {
       return parsed;
     }
   }
-  if (isRecord(raw) && raw.seconds !== undefined) {
+  if (
+    isRecord(raw) &&
+    (typeof raw.seconds === "number" ||
+      typeof raw.seconds === "bigint" ||
+      (typeof raw.seconds === "string" && raw.seconds.trim().length > 0))
+  ) {
     const sec = Number(raw.seconds);
     const nanos =
-      typeof raw.nanos === "number" && Number.isFinite(raw.nanos)
+      typeof raw.nanos === "number" &&
+      Number.isFinite(raw.nanos) &&
+      raw.nanos >= 0 &&
+      raw.nanos < 1_000_000_000
         ? raw.nanos
         : 0;
-    if (Number.isFinite(sec) && sec > 0) {
+    if (Number.isFinite(sec) && sec > 0 && Number.isFinite(sec * 1000)) {
       return sec * 1000 + Math.floor(nanos / 1_000_000);
     }
   }
@@ -131,11 +163,13 @@ function normalizeSingleRoom(
 
   const previewObj = isRecord(entry.preview) ? entry.preview : null;
   const lastMessageText =
-    typeof previewObj?.text === "string"
-      ? previewObj.text
-      : typeof entry.lastMessageText === "string"
-        ? entry.lastMessageText
-        : "";
+    previewObj?.deleted === true
+      ? ""
+      : typeof previewObj?.text === "string"
+        ? previewObj.text
+        : typeof entry.lastMessageText === "string"
+          ? entry.lastMessageText
+          : "";
 
   return {
     id,
@@ -198,7 +232,7 @@ export function normalizeProtoMessage(
   const senderId = typeof rawSender === "string" ? rawSender.trim() : "";
   const text = typeof raw.text === "string" ? raw.text : "";
   const createdAtMs = parseTimestampMs(raw.createdAt);
-  const key = cid ?? `seq-${seq}`;
+  const key = seq !== null ? `seq-${seq}` : cid!;
 
   return {
     key,
@@ -229,41 +263,110 @@ export function normalizeHistoryResponse(
   return timeline;
 }
 
+function mergeChatMessagePair(
+  base: ChatMessageView,
+  patch: ChatMessageView,
+): ChatMessageView {
+  const baseConfirmed = base.seq !== null;
+  const patchConfirmed = patch.seq !== null;
+
+  if (baseConfirmed && !patchConfirmed) {
+    return {
+      ...patch,
+      ...base,
+      seq: base.seq,
+      senderId: base.senderId || patch.senderId,
+      text: base.text,
+      createdAtMs: base.createdAtMs,
+      status: "sent",
+      cid: base.cid ?? patch.cid,
+    };
+  }
+
+  if (!baseConfirmed && patchConfirmed) {
+    return {
+      ...base,
+      ...patch,
+      seq: patch.seq,
+      senderId: patch.senderId || base.senderId,
+      text: patch.text,
+      createdAtMs: patch.createdAtMs,
+      status: "sent",
+      cid: patch.cid ?? base.cid,
+    };
+  }
+
+  if (baseConfirmed && patchConfirmed) {
+    return {
+      ...base,
+      ...patch,
+      seq: patch.seq,
+      senderId: patch.senderId || base.senderId,
+      text: patch.text,
+      createdAtMs: patch.createdAtMs,
+      status: "sent",
+      cid: patch.cid ?? base.cid,
+    };
+  }
+
+  return {
+    ...base,
+    ...patch,
+    seq: null,
+    senderId: patch.senderId || base.senderId,
+    cid: patch.cid ?? base.cid,
+  };
+}
+
 export function mergeMessageIntoTimeline(
   existing: ReadonlyArray<ChatMessageView>,
   incoming: ChatMessageView,
 ): ChatMessageView[] {
-  const next: ChatMessageView[] = [];
-  let replaced = false;
+  const matched: ChatMessageView[] = [];
+  const unmatched: ChatMessageView[] = [];
 
   for (const item of existing) {
     const sameSeq =
       incoming.seq !== null && item.seq !== null && item.seq === incoming.seq;
     const sameCid =
-      Boolean(incoming.cid) && Boolean(item.cid) && item.cid === incoming.cid;
+      Boolean(incoming.cid) &&
+      Boolean(item.cid) &&
+      item.cid === incoming.cid &&
+      (item.seq === null ||
+        incoming.seq === null ||
+        item.seq === incoming.seq) &&
+      (!item.senderId ||
+        !incoming.senderId ||
+        item.senderId === incoming.senderId);
 
     if (sameSeq || sameCid) {
-      if (!replaced) {
-        const resolvedSeq = incoming.seq ?? item.seq;
-        const resolvedStatus = resolvedSeq !== null ? "sent" : incoming.status;
-        next.push({
-          ...item,
-          ...incoming,
-          seq: resolvedSeq,
-          status: resolvedStatus,
-          key: item.cid ?? incoming.cid ?? incoming.key,
-          cid: incoming.cid ?? item.cid,
-        });
-        replaced = true;
-      }
+      matched.push(item);
     } else {
-      next.push(item);
+      unmatched.push(item);
     }
   }
 
-  if (!replaced) {
-    next.push(incoming);
+  const candidates = [...matched, incoming];
+  let merged = candidates[0]!;
+  for (let i = 1; i < candidates.length; i += 1) {
+    merged = mergeChatMessagePair(merged, candidates[i]!);
   }
+
+  const unmatchedKeys = new Set(unmatched.map((m) => m.key));
+  const optimisticMatch = matched.find((m) => m.seq === null);
+  const preferredKey = optimisticMatch?.key ?? matched[0]?.key ?? incoming.key;
+  const resolvedKey =
+    unmatchedKeys.has(preferredKey) && merged.seq !== null
+      ? `seq-${merged.seq}`
+      : preferredKey;
+
+  const next: ChatMessageView[] = [
+    ...unmatched,
+    {
+      ...merged,
+      key: resolvedKey,
+    },
+  ];
 
   next.sort((a, b) => {
     if (a.seq !== null && b.seq !== null) {
