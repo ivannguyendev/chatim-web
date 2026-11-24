@@ -2,7 +2,7 @@
 
 **Mã tài liệu:** `261124-sdk-protocol-p2-summary`  
 **Ngày lập:** 2026-11-24  
-**Trạng thái:** Đã Hoàn thành (Actual Build)  
+**Trạng thái:** Đã Hoàn thành (Actual Build) — đính chính 2026-11-24, xem mục 7  
 **Phạm vi:** Phase 2 trong chuỗi phát triển `chatim-web`.
 
 ---
@@ -19,14 +19,14 @@ Xây dựng hoàn chỉnh gói thư viện `packages/sdk` thuần TypeScript (kh
 1. **Quản lý Token (`packages/sdk/src/auth/token.ts`):**
    * Đổi JWT của tenant lấy token chat Ed25519 (TTL 300s) qua `POST /v1/token` (RFC 8693).
    * Lên lịch tự gia hạn ngầm tại điểm ngẫu nhiên trong dải `70% – 85%` của `exp - iat` (không tin đồng hồ máy client).
-   * Xử lý lỗi thu hồi phiên (`auth_required{REVOKED}`) và rate limit (`429`/`503` `Retry-After`).
+   * Đổi token lỗi (mọi mã khác 2xx) thì ném lỗi; chưa xử lý riêng `429`/`503` `Retry-After` (mục 7).
 2. **WebSocket State Machine (`packages/sdk/src/transport/ws.ts`):**
    * Kết nối tới `/ws` với subprotocol `chatim.v1`, chỉ truyền nhận frame nhị phân protobuf (`ClientFrame` / `ServerFrame`).
    * Quản lý 2 trạng thái nghiêm ngặt: *Chờ đăng nhập* và *Đang chạy*.
    * Gửi `AuthFrame{token}` sau handshake, nhận `ReadyFrame{}`.
    * Quản lý Heartbeat: Gửi `HeartbeatFrame{}` mỗi 8s (trước ngưỡng timeout 15s của server).
-   * Xử lý 10 loại frame từ server: `response` (khớp `request_id`), `ready`, `event`, `notification`, `resync`, `typing`, `presence`, `retry_later`, `auth_required`, `load_failed`, `room_closed`, `frame_error`.
-   * Gửi lệnh realtime qua WebSocket: `SendMessage`, `open_room`, `close_room`, `watch_presence` (tối đa 200 ID), `typing` (tối đa 1 lần / 3s).
+   * Giải mã mọi `ServerFrame` và chuyển nguyên cho `onFrame`; tự xử lý `ready` (sang *Đang chạy*) và `retry_later` (chờ đúng ms rồi gửi lại `auth`). Chưa khớp `response` theo `request_id`, chưa xử lý `load_failed` (mục 7).
+   * Gửi lệnh realtime qua WebSocket: `SendMessage`, `open_room`, `close_room`, `watch_presence`, `typing`. Frame gửi khi socket chưa mở bị bỏ không báo lỗi; chưa cắt 200 ID, chưa giãn typing 3s (mục 7).
 3. **Cơ chế Nối lại & Backoff (`packages/sdk/src/transport/retry.ts`):**
    * Triển khai bảng quy tắc backoff theo mã đóng WebSocket:
      * `1001` (server restart): ngẫu nhiên 0–60s.
@@ -42,7 +42,7 @@ Xây dựng hoàn chỉnh gói thư viện `packages/sdk` thuần TypeScript (kh
    * Cơ chế batching cho `DirectoryService/GetUsers`: Tự động gộp các user ID yêu cầu trong cùng một event loop tick thành 1 request (tối đa 100 ID/lần theo giới hạn server).
    * Gọi `GetMyProfile` đọc profile của chính mình từ RAM.
 6. **ChatimClient Facade (`packages/sdk/src/client.ts` & `src/index.ts`):**
-   * Lớp điều phối trung tâm: Khởi tạo, mở/đóng kết nối, đăng ký sự kiện typed (`on('event')`, `on('statusChange')`, `on('typing')`, `on('presence')`).
+   * Lớp điều phối trung tâm: Khởi tạo, mở/đóng kết nối, đăng ký `onFrame` (mọi `ServerFrame`) và `onStatusChange`.
 7. **Kiểm thử Toàn diện:**
    * Viết fake WebSocket trong bộ test để giả lập toàn bộ hành vi server mà không cần chạy backend Go.
 
@@ -72,7 +72,7 @@ Xây dựng hoàn chỉnh gói thư viện `packages/sdk` thuần TypeScript (kh
 1. **Tuân thủ Hợp đồng WebSocket (Module 09 §11):**
    * Subprotocol `chatim.v1`, frame gửi/nhận là nhị phân protobuf (`ClientFrame` / `ServerFrame`).
    * Chuyển trạng thái sang "Đang chạy" sau khi nhận `ready`.
-   * Phát `heartbeat` đều đặn mỗi 8s; tự động ngắt kết nối nếu quá 15s không có tín hiệu.
+   * Phát `heartbeat` đều đặn mỗi 8s (validator kiểm < 15s timeout của server). Client chưa tự phát hiện server im lặng quá 15s (mục 7).
    * Tự gia hạn token khi chạm mốc 70–85% TTL bằng cách gửi `AuthFrame{token}` trên kết nối đang mở mà không ngắt socket.
    * Xử lý đúng `retry_later` (chờ đúng ms rồi auth lại) và `resync` (phát sự kiện yêu cầu nạp lại qua HTTP).
    * Áp dụng đúng thời gian backoff cho từng mã đóng (`1001`, `1000`, `1006`, `4009`, `4001`, `4003`).
@@ -104,3 +104,22 @@ Xây dựng hoàn chỉnh gói thư viện `packages/sdk` thuần TypeScript (kh
 | **Rò rỉ Timer/Interval khi ngắt kết nối** | Cao | Tất cả timers (heartbeat, renew, backoff) được quản lý tập trung và dọn dẹp sạch sẽ (`clearTimeout`/`clearInterval`) trong hàm `close()`. |
 | **Xung đột token khi đang gia hạn ngầm** | Trung bình | Khóa luồng gia hạn bằng Promise dùng chung (in-flight deduplication) để nhiều request đồng thời không gọi trùng `POST /v1/token`. |
 
+
+---
+
+## 7. Đính chính so với code thực tế (đối chiếu 2026-11-24)
+
+Bản trước của tóm tắt này ghi một số luật là đã có, nhưng code P2 chưa làm. Đối chiếu với spec server `chatim` (`docs/features/09-feature-realtime-delivery-and-ephemeral.md` §11):
+
+| Luật client | Code P2 | Chuyển đi đâu |
+| :--- | :--- | :--- |
+| Khớp `response{id}` của `SendMessage`, timeout lệnh | chưa có; `sendMessage()` trả `void` | P3a |
+| Frame gửi khi socket chưa chạy | bị bỏ, không báo lỗi | P3a (reject ngay) |
+| Gửi lại `open_room` + `watch_presence` sau mọi `ready` | chưa có | P3a |
+| `load_failed` → `load_rooms` sau `retry_after_ms` | chưa có | P3a |
+| `MarkRead` giãn 1 lần/giây/phòng | chưa có | P3a |
+| Cắt `watch_presence` 200 ID | chưa có | P3a (SDK); giãn typing 3s ở web (P3) |
+| `429`/`503` `Retry-After` khi đổi token | chưa có | chưa xếp phase |
+| Tự phát hiện server im lặng > 15s | chưa có, spec không bắt buộc | chưa xếp phase |
+
+Chi tiết P3a: `docs/plans/261124-sdk-fixes-p3a-summary.md`.

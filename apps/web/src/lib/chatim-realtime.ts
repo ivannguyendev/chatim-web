@@ -121,12 +121,18 @@ export function createFrameHandler(
       const rId = parsed.roomId;
       if (parsed.senderId) clearTyping(rId, parsed.senderId);
       const msgKey = queryKeys.messages(d.userId, rId);
-      const seededAt = d.queryClient.getQueryState(msgKey)?.dataUpdatedAt ?? 0;
-      d.queryClient.setQueryData<ChatMessageView[]>(
-        msgKey,
-        (cur) => mergeMessageIntoTimeline(cur ?? [], parsed),
-        { updatedAt: seededAt },
+      const prev = d.queryClient.getQueryState(msgKey);
+      const needsFullLoad = prev?.data === undefined || prev.isInvalidated;
+      d.queryClient.setQueryData<ChatMessageView[]>(msgKey, (cur) =>
+        mergeMessageIntoTimeline(cur ?? [], parsed),
       );
+      if (needsFullLoad) {
+        void d.queryClient.invalidateQueries({
+          queryKey: msgKey,
+          exact: true,
+          refetchType: "none",
+        });
+      }
       const inc =
         d.activeRoomRef.current !== rId && parsed.senderId !== d.userId ? 1 : 0;
       const lastMessageText = parsed.text;

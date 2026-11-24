@@ -64,7 +64,7 @@ npm scripts are defined at scaffold time; document them here once they exist.
 
 ## Server Contract Rules
 
-Source of truth: `chatim` repo, `docs/modules/09-feature-realtime-delivery-and-ephemeral.md` §11 (client spec), `docs/apps/gateway.md`, `docs/apps/identity.md`. Copy the parts this repo depends on into `docs/` before implementing them.
+Source of truth: `chatim` repo, `docs/features/09-feature-realtime-delivery-and-ephemeral.md` §11 (client spec), `docs/apps/gateway.md`, `docs/apps/identity.md`. Copy the parts this repo depends on into `docs/` before implementing them.
 
 - **WebSocket:** binary protobuf frames only (`ClientFrame` up, `ServerFrame` down), subprotocol `chatim.v1`; no JSON, no compression. Heartbeat, reconnect backoff per close code, token renew timing, `load_failed`/`resync` handling follow §11 exactly; each rule is a unit-tested item in `packages/sdk`.
 - **Command split:** realtime writes go over WebSocket; reads, room management, and auth go over HTTP. No RPC is used. Never send a command over the wrong transport.

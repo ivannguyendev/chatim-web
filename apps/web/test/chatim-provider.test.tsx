@@ -358,8 +358,8 @@ describe("ChatimProvider and realtime hooks", () => {
 
     expect(
       queryClient.getQueryState(queryKeys.messages("lan", "r_inactive"))
-        ?.dataUpdatedAt,
-    ).toBe(0);
+        ?.isInvalidated,
+    ).toBe(true);
 
     const updatedRooms = queryClient.getQueryData<ChatRoomView[]>(
       queryKeys.rooms("lan"),
