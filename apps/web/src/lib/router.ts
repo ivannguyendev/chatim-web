@@ -6,6 +6,10 @@ export type AppRoute =
 
 const ROUTE_EVENT = "chatim:navigate";
 
+function getServerSnapshot(): string {
+  return "/";
+}
+
 function getSnapshot(): string {
   if (typeof window === "undefined") {
     return "/";
@@ -32,7 +36,11 @@ export function navigate(
   if (typeof window === "undefined") {
     return;
   }
-  if (window.location.pathname === to) {
+  if (!to.startsWith("/") || to.startsWith("//") || to.startsWith("/\\")) {
+    return;
+  }
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (current === to) {
     return;
   }
   if (options.replace) {
@@ -44,11 +52,11 @@ export function navigate(
 }
 
 export function usePathname(): string {
-  return useSyncExternalStore(subscribe, getSnapshot, () => "/");
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 export function parseAppRoute(pathname: string): AppRoute {
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/login/") {
     return { kind: "login" };
   }
   if (pathname.startsWith("/chat/")) {

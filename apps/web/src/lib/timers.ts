@@ -5,25 +5,43 @@ export interface ChatUiTimers {
   maxPresenceWatch: number;
 }
 
+const MAX_TIMER_MS = 2_147_483_647;
+
 export function validateChatTimers(timers: ChatUiTimers): ChatUiTimers {
-  if (timers.typingThrottleMs < 1000) {
+  if (
+    !Number.isFinite(timers.typingThrottleMs) ||
+    timers.typingThrottleMs < 1000 ||
+    timers.typingThrottleMs > MAX_TIMER_MS
+  ) {
     throw new Error(
-      `typingThrottleMs must be >= 1000ms to respect server rate limit, got ${timers.typingThrottleMs}`,
+      `typingThrottleMs must be a finite number between 1000ms and ${MAX_TIMER_MS}ms, got ${timers.typingThrottleMs}`,
     );
   }
-  if (timers.typingExpireMs <= timers.typingThrottleMs) {
+  if (
+    !Number.isFinite(timers.typingExpireMs) ||
+    timers.typingExpireMs <= timers.typingThrottleMs ||
+    timers.typingExpireMs > MAX_TIMER_MS
+  ) {
     throw new Error(
-      `typingExpireMs (${timers.typingExpireMs}) must exceed typingThrottleMs (${timers.typingThrottleMs})`,
+      `typingExpireMs (${timers.typingExpireMs}) must be a finite number <= ${MAX_TIMER_MS}ms and exceed typingThrottleMs (${timers.typingThrottleMs})`,
     );
   }
-  if (timers.historyPageLimit < 1 || timers.historyPageLimit > 100) {
+  if (
+    !Number.isInteger(timers.historyPageLimit) ||
+    timers.historyPageLimit < 1 ||
+    timers.historyPageLimit > 100
+  ) {
     throw new Error(
-      `historyPageLimit must be between 1 and 100, got ${timers.historyPageLimit}`,
+      `historyPageLimit must be an integer between 1 and 100, got ${timers.historyPageLimit}`,
     );
   }
-  if (timers.maxPresenceWatch < 1 || timers.maxPresenceWatch > 200) {
+  if (
+    !Number.isInteger(timers.maxPresenceWatch) ||
+    timers.maxPresenceWatch < 1 ||
+    timers.maxPresenceWatch > 200
+  ) {
     throw new Error(
-      `maxPresenceWatch must be between 1 and 200, got ${timers.maxPresenceWatch}`,
+      `maxPresenceWatch must be an integer between 1 and 200, got ${timers.maxPresenceWatch}`,
     );
   }
   return timers;
