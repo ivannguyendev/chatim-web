@@ -1,10 +1,10 @@
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
   AuthFrameSchema,
-  ClientFrame,
+  type ClientFrame,
   ClientFrameSchema,
   HeartbeatFrameSchema,
-  ServerFrame,
+  type ServerFrame,
   ServerFrameSchema,
 } from "../gen/chatim/v1/ws_pb";
 import { getReconnectDelayMs } from "./retry";
@@ -128,7 +128,7 @@ export class WebSocketTransport {
         this.setStatus("running");
         this.reconnectAttempt = 0;
         this.startHeartbeat();
-      } else if (serverFrame.frame.case === "retry_later") {
+      } else if (serverFrame.frame.case === "retryLater") {
         const retryAfterMs =
           Number(serverFrame.frame.value.retryAfterMs) || 1000;
         setTimeout(async () => {

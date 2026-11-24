@@ -1,27 +1,27 @@
 import { create } from "@bufbuild/protobuf";
 import { TokenManager } from "./auth/token";
 import {
-  validateClientConfig,
-  ClientConfig,
+  type ClientConfig,
   DEFAULT_CLIENT_CONFIG,
+  validateClientConfig,
 } from "./config/validator";
-import { DirectoryBatcher, UserProfile } from "./directory/batcher";
-import { GatewayClient } from "./transport/http";
-import {
-  ConnectionStatus,
-  WebSocketTransport,
-  WebSocketTransportOptions,
-} from "./transport/ws";
+import { DirectoryBatcher, type UserProfile } from "./directory/batcher";
+import { SendMessageRequestSchema } from "./gen/chatim/v1/chat_pb";
 import {
   ClientFrameSchema,
   ClientRequestSchema,
   CloseRoomFrameSchema,
   OpenRoomFrameSchema,
-  SendMessageRequestSchema,
-  ServerFrame,
+  type ServerFrame,
   TypingFrameSchema,
   WatchPresenceFrameSchema,
 } from "./gen/chatim/v1/ws_pb";
+import { GatewayClient } from "./transport/http";
+import {
+  type ConnectionStatus,
+  WebSocketTransport,
+  type WebSocketTransportOptions,
+} from "./transport/ws";
 
 export interface ChatimClientOptions extends Partial<ClientConfig> {
   getSubjectToken: () => Promise<string>;

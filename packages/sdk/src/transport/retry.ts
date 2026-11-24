@@ -22,6 +22,6 @@ export function getReconnectDelayMs(
     return 0;
   }
 
-  const base = 1000 * Math.pow(2, attempt);
+  const base = 1000 * 2 ** attempt;
   return Math.min(60000, base);
 }

@@ -1,13 +1,13 @@
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fromBinary, toBinary, create } from "@bufbuild/protobuf";
-import { WebSocketTransport } from "../../src/transport/ws";
-import { FakeWebSocket } from "../helpers/fake-socket";
 import {
   ClientFrameSchema,
-  ServerFrameSchema,
-  ReadyFrameSchema,
   HeartbeatFrameSchema,
+  ReadyFrameSchema,
+  ServerFrameSchema,
 } from "../../src/gen/chatim/v1/ws_pb";
+import { WebSocketTransport } from "../../src/transport/ws";
+import { FakeWebSocket } from "../helpers/fake-socket";
 
 describe("WebSocketTransport", () => {
   beforeEach(() => {

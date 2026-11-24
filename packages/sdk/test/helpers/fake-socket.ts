@@ -12,7 +12,7 @@ export class FakeWebSocket {
   url: string;
   protocol: string;
   readyState: number = FakeWebSocket.CONNECTING;
-  binaryType: string = "arraybuffer";
+  binaryType = "arraybuffer";
 
   sentData: Array<ArrayBuffer | ArrayBufferView | string> = [];
 

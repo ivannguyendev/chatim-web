@@ -5,5 +5,5 @@ README.md,doc,"Repository overview (Vietnamese): what chatim-web is (single-tena
 .memory/MEMORY.md,doc,"Shared agent memory index and entry point for .memory/*.md: language preferences; ops setup enforced in code; owner communication style",language-preferences;ops-setup-hard-to-get-wrong;owner-communication,CLAUDE.md;Claude Code;AI Agents,none
 pnpm-workspace.yaml,config,"Monorepo workspace definition for packages/* and apps/*",packages;apps,pnpm,none
 biome.json,config,"Biome configuration for linter and code formatter across the monorepo",biome;linter;formatter,Biome CLI,none
-packages/sdk,dir,"Framework-agnostic TypeScript SDK: protobuf binary frames for WebSocket, timer validator, transport foundation",SDK_VERSION;validateClientConfig;ClientConfig,@chatim/web;external apps,packages/sdk/test/
+packages/sdk,dir,"Framework-agnostic TypeScript SDK: WebSocket binary protobuf chatim.v1, token manager, gateway client, directory batcher",ChatimClient;createChatimClient;TokenManager;WebSocketTransport;GatewayClient;DirectoryBatcher,@chatim/web;external apps,packages/sdk/test/
 apps/web,dir,"React 19 web app: Vite SPA, zero-config env, App Shell, ConnectionBanner",App;ConnectionBanner;parseEnv;UI_COPY,Engineers,apps/web/test/
