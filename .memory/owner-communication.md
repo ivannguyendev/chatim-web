@@ -12,4 +12,4 @@ metadata:
 5. Keep "problems of the current code" visibly separate from "the fix".
 
 **Why:** repeated owner corrections in chatim (summaries too long and patched, questions not understood, extra mechanisms bringing new bugs); the owner applied them to chatim-web on 2026-11-07.
-**How to apply:** check every brainstorm, summary and question against this list before sending. Related: [[agent-workflow-rules]], [[ops-setup-hard-to-get-wrong]].
+**How to apply:** check every brainstorm, summary and question against this list before sending. Related: [[ops-setup-hard-to-get-wrong]].

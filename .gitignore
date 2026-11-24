@@ -153,5 +153,5 @@ vite.config.ts.timestamp-*
 
 # Transient inputs and agent plans (never commit)
 .local/
-.claude/plans/
-.agent/plans/
+.claude/
+.agent/
