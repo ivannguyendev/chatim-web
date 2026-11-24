@@ -1,8 +1,4 @@
-import {
-  type ChatimClientOptions,
-  type UserProfile,
-  createChatimClient,
-} from "@chatim/sdk";
+import type { UserProfile } from "@chatim/sdk";
 import type { QueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 import {
@@ -18,59 +14,10 @@ import type {
   SdkStatus,
   UiConnectionStatus,
 } from "./chatim-types";
-import { env } from "./env";
 import { queryKeys } from "./query-client";
 import { CHAT_TIMERS } from "./timers";
 
-type ClientFactory = (opts: ChatimClientOptions) => ChatimClientAdapter;
 type SetRecord<V> = Dispatch<SetStateAction<Record<string, V>>>;
-
-export interface AdapterRefs {
-  innerClient: { current: ChatimClientAdapter | null };
-  getSubjectToken: { current: () => Promise<string> };
-  factory: { current: ClientFactory | undefined };
-}
-
-export function createDelegatingAdapter(
-  refs: AdapterRefs,
-): ChatimClientAdapter {
-  const ensure = (): ChatimClientAdapter => {
-    if (refs.innerClient.current === null) {
-      const opts: ChatimClientOptions = {
-        gatewayUrl: env.GATEWAY_URL,
-        wsUrl: env.WS_URL,
-        identityUrl: env.IDENTITY_URL,
-        getSubjectToken: () => refs.getSubjectToken.current(),
-      };
-      refs.innerClient.current = refs.factory.current
-        ? refs.factory.current(opts)
-        : createChatimClient(opts);
-    }
-    return refs.innerClient.current;
-  };
-
-  return {
-    get status() {
-      return refs.innerClient.current?.status ?? "disconnected";
-    },
-    connect: () => ensure().connect(),
-    close: () => {
-      refs.innerClient.current?.close();
-      refs.innerClient.current = null;
-    },
-    onStatusChange: (h) => ensure().onStatusChange(h),
-    onFrame: (h) => ensure().onFrame(h),
-    sendMessage: (r, t, c) => ensure().sendMessage(r, t, c),
-    sendTyping: (r, s) => ensure().sendTyping(r, s),
-    openRoom: (r) => ensure().openRoom(r),
-    closeRoom: (r) => ensure().closeRoom(r),
-    watchPresence: (ids) => ensure().watchPresence(ids),
-    listMyRooms: () => ensure().listMyRooms(),
-    getHistory: (r, l) => ensure().getHistory(r, l),
-    getUser: (u) => ensure().getUser(u),
-    getMyProfile: () => ensure().getMyProfile(),
-  };
-}
 
 export function mapSdkStatus(
   prev: UiConnectionStatus,
@@ -137,12 +84,15 @@ export function createFrameHandler(
       }
     } else if (frame.case === "presence") {
       d.setPresenceMap((prev) => {
-        const next = { ...prev };
+        let next: Record<string, boolean> | null = null;
         for (const e of frame.value.entries) {
           const id = e.userId.trim();
-          if (id) next[id] = e.online;
+          if (id && prev[id] !== e.online) {
+            next ??= { ...prev };
+            next[id] = e.online;
+          }
         }
-        return next;
+        return next ?? prev;
       });
     } else if (frame.case === "typing") {
       const rId = frame.value.roomId.trim();
@@ -171,27 +121,27 @@ export function createFrameHandler(
       const rId = parsed.roomId;
       if (parsed.senderId) clearTyping(rId, parsed.senderId);
       const msgKey = queryKeys.messages(d.userId, rId);
-      const empty = d.queryClient.getQueryData(msgKey) === undefined;
-      d.queryClient.setQueryData<ChatMessageView[]>(msgKey, (cur) =>
-        mergeMessageIntoTimeline(cur ?? [], parsed),
+      const seededAt = d.queryClient.getQueryState(msgKey)?.dataUpdatedAt ?? 0;
+      d.queryClient.setQueryData<ChatMessageView[]>(
+        msgKey,
+        (cur) => mergeMessageIntoTimeline(cur ?? [], parsed),
+        { updatedAt: seededAt },
       );
-      if (empty) {
-        void d.queryClient.invalidateQueries({
-          queryKey: msgKey,
-          refetchType: "none",
-        });
-      }
       const inc =
         d.activeRoomRef.current !== rId && parsed.senderId !== d.userId ? 1 : 0;
       const lastMessageText = parsed.text;
-      d.queryClient.setQueryData<ChatRoomView[]>(
-        queryKeys.rooms(d.userId),
-        (rs) =>
-          rs?.map((r) =>
-            r.id !== rId
-              ? r
-              : { ...r, lastMessageText, unreadCount: r.unreadCount + inc },
-          ),
+      const roomsKey = queryKeys.rooms(d.userId);
+      const rooms = d.queryClient.getQueryData<ChatRoomView[]>(roomsKey);
+      if (rooms && !rooms.some((r) => r.id === rId)) {
+        inv(roomsKey);
+        return;
+      }
+      d.queryClient.setQueryData<ChatRoomView[]>(roomsKey, (rs) =>
+        rs?.map((r) =>
+          r.id !== rId
+            ? r
+            : { ...r, lastMessageText, unreadCount: r.unreadCount + inc },
+        ),
       );
     }
   };

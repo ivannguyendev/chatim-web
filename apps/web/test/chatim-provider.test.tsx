@@ -16,11 +16,18 @@ import {
 import { createAppQueryClient, queryKeys } from "../src/lib/query-client";
 import { FakeChatimClient } from "./helpers/fake-chatim-client";
 
-function RealtimeProbe({ roomId }: { roomId: string | null }) {
+function RealtimeProbe({
+  roomId,
+  onPresenceRender,
+}: {
+  roomId: string | null;
+  onPresenceRender?: (map: Readonly<Record<string, boolean>>) => void;
+}) {
   const client = useChatimClient();
   const status = useConnectionStatus();
   const presence = usePresenceMap();
   const typingUsers = useTypingUsers(roomId);
+  onPresenceRender?.(presence);
 
   return (
     <div>
@@ -59,10 +66,11 @@ describe("ChatimProvider and realtime hooks", () => {
     vi.useRealTimers();
   });
 
-  it("connects on mount, maps status transitions, updates presence, and handles typing expiry and stopped flags", () => {
+  it("connects on mount, maps status transitions, updates presence without no-op clones, and handles typing expiry and stopped flags", () => {
     vi.useFakeTimers();
     const fakeClient = new FakeChatimClient();
     const queryClient = createAppQueryClient();
+    let latestPresence: Readonly<Record<string, boolean>> = {};
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -72,7 +80,12 @@ describe("ChatimProvider and realtime hooks", () => {
           getSubjectToken={async () => "dev.subject.token"}
           clientFactory={() => fakeClient}
         >
-          <RealtimeProbe roomId="r_1" />
+          <RealtimeProbe
+            roomId="r_1"
+            onPresenceRender={(m) => {
+              latestPresence = m;
+            }}
+          />
         </ChatimProvider>
       </QueryClientProvider>,
     );
@@ -107,6 +120,22 @@ describe("ChatimProvider and realtime hooks", () => {
       alice: true,
       bob: false,
     });
+    const snapshotPresence = latestPresence;
+
+    act(() => {
+      fakeClient.emitFrame({
+        frame: {
+          case: "presence",
+          value: {
+            entries: [
+              { userId: "alice", online: true },
+              { userId: "bob", online: false },
+            ],
+          },
+        },
+      });
+    });
+    expect(latestPresence).toBe(snapshotPresence);
 
     act(() => {
       fakeClient.emitFrame({
@@ -187,9 +216,10 @@ describe("ChatimProvider and realtime hooks", () => {
     expect(screen.getByTestId("typing").textContent).toBe("");
   });
 
-  it("patches messages and rooms caches on messageCreated, clears sender typing, and increments unreadCount only for inactive rooms from peers", () => {
+  it("patches messages and rooms caches on messageCreated, marks unseeded room messages invalidated, and invalidates rooms when room is unknown", () => {
     const fakeClient = new FakeChatimClient();
     const queryClient = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
     const initialRooms: ChatRoomView[] = [
       {
@@ -326,6 +356,11 @@ describe("ChatimProvider and realtime hooks", () => {
       });
     });
 
+    expect(
+      queryClient.getQueryState(queryKeys.messages("lan", "r_inactive"))
+        ?.dataUpdatedAt,
+    ).toBe(0);
+
     const updatedRooms = queryClient.getQueryData<ChatRoomView[]>(
       queryKeys.rooms("lan"),
     );
@@ -341,6 +376,36 @@ describe("ChatimProvider and realtime hooks", () => {
         unreadCount: 3,
       },
     ]);
+
+    invalidateSpy.mockClear();
+
+    act(() => {
+      fakeClient.emitFrame({
+        frame: {
+          case: "event",
+          value: {
+            roomId: "r_unknown_new",
+            payload: {
+              case: "messageCreated",
+              value: {
+                message: {
+                  roomId: "r_unknown_new",
+                  seq: 1n,
+                  sender: "alice",
+                  text: "Phòng mới tạo",
+                  createdAt: 3_000,
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    expect(queryClient.getQueryData(queryKeys.rooms("lan"))).toBe(updatedRooms);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.rooms("lan"),
+    });
   });
 
   it("invalidates rooms and active room messages queries when receiving resync", () => {
@@ -568,5 +633,67 @@ describe("ChatimProvider and realtime hooks", () => {
       expect(screen.getByTestId("peer-name").textContent).toBe("Alice Trần");
       expect(screen.getByTestId("peer-avatar").textContent).toBe("none");
     });
+  });
+
+  it("uses updated getSubjectToken and clientFactory immediately for child queries when switching userId", async () => {
+    const queryClient = createAppQueryClient();
+    const lanClient = new FakeChatimClient();
+    const aliceClient = new FakeChatimClient();
+    const observedTokens: string[] = [];
+
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ChatimProvider
+          userId="lan"
+          activeRoomId={null}
+          getSubjectToken={async () => "lan.token"}
+          clientFactory={(opts) => {
+            lanClient.getMyProfile.mockImplementation(async () => {
+              const token = await opts.getSubjectToken();
+              observedTokens.push(`lanFactory:${token}`);
+              return { id: "lan", displayName: "Lan Nguyễn" };
+            });
+            return lanClient;
+          }}
+        >
+          <ProfileProbe fallbackName="Lan Tạm" targetUserId="bob" />
+        </ChatimProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("my-name").textContent).toBe("Lan Nguyễn");
+    });
+    expect(observedTokens).toEqual(["lanFactory:lan.token"]);
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ChatimProvider
+          userId="alice"
+          activeRoomId={null}
+          getSubjectToken={async () => "alice.token"}
+          clientFactory={(opts) => {
+            aliceClient.getMyProfile.mockImplementation(async () => {
+              const token = await opts.getSubjectToken();
+              observedTokens.push(`aliceFactory:${token}`);
+              return { id: "alice", displayName: "Alice Trần" };
+            });
+            return aliceClient;
+          }}
+        >
+          <ProfileProbe fallbackName="Alice Tạm" targetUserId="bob" />
+        </ChatimProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("my-name").textContent).toBe("Alice Trần");
+    });
+    expect(lanClient.close).toHaveBeenCalledTimes(1);
+    expect(aliceClient.connect).toHaveBeenCalledTimes(1);
+    expect(observedTokens).toEqual([
+      "lanFactory:lan.token",
+      "aliceFactory:alice.token",
+    ]);
   });
 });

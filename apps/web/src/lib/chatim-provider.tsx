@@ -5,12 +5,13 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createDelegatingAdapter } from "./chatim-adapter";
 import {
-  createDelegatingAdapter,
   createFrameHandler,
   mapSdkStatus,
   toSafeProfile,
@@ -73,13 +74,13 @@ export function ChatimProvider({
     Record<string, ReadonlyArray<string>>
   >({});
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     getSubjectTokenRef.current = getSubjectToken;
     activeRoomRef.current = activeRoomId;
     factoryRef.current = clientFactory;
   }, [getSubjectToken, activeRoomId, clientFactory]);
 
-  const adapter = useMemo<ChatimClientAdapter>(
+  const { adapter, ensureClient } = useMemo(
     () =>
       createDelegatingAdapter({
         innerClient: innerClientRef,
@@ -98,7 +99,7 @@ export function ChatimProvider({
     const unsubStatus = adapter.onStatusChange((nextStatus) => {
       setConnectionStatus((prev) => mapSdkStatus(prev, nextStatus));
     });
-    const rawClient = innerClientRef.current!;
+    const rawClient = ensureClient();
     const unsubFrame = rawClient.onFrame(
       createFrameHandler({
         userId,
@@ -120,7 +121,7 @@ export function ChatimProvider({
       typingTimers.clear();
       adapter.close();
     };
-  }, [adapter, queryClient, userId]);
+  }, [adapter, ensureClient, queryClient, userId]);
 
   const scopeValue = useMemo<ClientScopeValue>(
     () => ({ client: adapter, userId }),
