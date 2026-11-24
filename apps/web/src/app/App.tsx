@@ -1,12 +1,12 @@
+import { SDK_VERSION } from "@chatim/sdk";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type React from "react";
 import { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { UI_COPY } from "../constants/ui-copy";
 import {
   ConnectionBanner,
   type ConnectionStatus,
 } from "../features/shell/components/ConnectionBanner";
-import { UI_COPY } from "../constants/ui-copy";
-import { SDK_VERSION } from "@chatim/sdk";
 
 const queryClient = new QueryClient();
 

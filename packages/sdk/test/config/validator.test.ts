@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  validateClientConfig,
   DEFAULT_CLIENT_CONFIG,
+  validateClientConfig,
 } from "../../src/config/validator";
 
 describe("Client Config Validator (Ops Enforced in Code)", () => {

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ConnectionBanner } from "../src/features/shell/components/ConnectionBanner";
 import { UI_COPY } from "../src/constants/ui-copy";
+import { ConnectionBanner } from "../src/features/shell/components/ConnectionBanner";
 
 describe("ConnectionBanner", () => {
   it("renders connecting message when status is connecting", () => {
