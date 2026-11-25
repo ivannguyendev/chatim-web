@@ -35,4 +35,11 @@ describe("Reconnect Backoff Calculator", () => {
     expect(getReconnectDelayMs(1002, 2)).toBe(4000);
     expect(getReconnectDelayMs(1002, 10)).toBe(60000);
   });
+
+  it("reconnects at once on a first 4001, then backs off repeated 4001s capped at 60s", () => {
+    expect(getReconnectDelayMs(4001, 0)).toBe(0);
+    expect(getReconnectDelayMs(4001, 1)).toBe(1000);
+    expect(getReconnectDelayMs(4001, 2)).toBe(2000);
+    expect(getReconnectDelayMs(4001, 20)).toBe(60000);
+  });
 });

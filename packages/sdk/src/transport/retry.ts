@@ -19,7 +19,7 @@ export function getReconnectDelayMs(
   }
 
   if (closeCode === 4001) {
-    return 0;
+    return attempt === 0 ? 0 : Math.min(60000, 1000 * 2 ** (attempt - 1));
   }
 
   const base = 1000 * 2 ** attempt;
