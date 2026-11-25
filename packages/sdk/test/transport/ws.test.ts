@@ -1,4 +1,9 @@
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import {
+  type MessageInitShape,
+  create,
+  fromBinary,
+  toBinary,
+} from "@bufbuild/protobuf";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ClientFrameSchema,
@@ -81,6 +86,164 @@ describe("WebSocketTransport", () => {
     );
     expect(heartbeatFrame.frame.case).toBe("heartbeat");
 
+    transport.close();
+  });
+
+  function setup() {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      wsUrl: "ws://localhost:8081/ws",
+      getToken: async () => "token-123",
+      webSocketFactory: (url, proto) => {
+        const ws = new FakeWebSocket(url, proto);
+        sockets.push(ws);
+        return ws as any;
+      },
+    });
+    const ws = () => sockets[sockets.length - 1]!;
+    const receive = (init: MessageInitShape<typeof ServerFrameSchema>) =>
+      ws().simulateMessage(
+        toBinary(
+          ServerFrameSchema,
+          create(ServerFrameSchema, init),
+        ) as unknown as ArrayBuffer,
+      );
+    const sentCases = () =>
+      ws().sentData.map(
+        (data) => fromBinary(ClientFrameSchema, data as Uint8Array).frame.case,
+      );
+    return { transport, ws, receive, sentCases, sockets };
+  }
+
+  it("sends heartbeat every 8s while still waiting for ready", async () => {
+    const { transport, ws, sentCases } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(8000);
+
+    expect(transport.status).toBe("waiting_auth");
+    expect(sentCases()).toEqual(["auth", "heartbeat"]);
+    transport.close();
+  });
+
+  it("notifies ready listeners on every ready, treats resync before ready as ready, and resync listeners only on a running connection", async () => {
+    const { transport, ws, receive } = setup();
+    const onReady = vi.fn();
+    const onResync = vi.fn();
+    transport.onReady(onReady);
+    transport.onResync(onResync);
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+
+    receive({ frame: { case: "resync", value: { reason: 1 } } });
+    expect(transport.status).toBe("running");
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(onResync).not.toHaveBeenCalled();
+
+    receive({ frame: { case: "resync", value: { reason: 1 } } });
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(onResync).toHaveBeenCalledTimes(1);
+
+    receive({ frame: { case: "ready", value: {} } });
+    expect(onReady).toHaveBeenCalledTimes(2);
+    expect(onResync).toHaveBeenCalledTimes(1);
+    transport.close();
+  });
+
+  it("sends load_rooms after retry_after_ms plus jitter when loading rooms failed", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const { transport, ws, receive, sentCases } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+
+    receive({ frame: { case: "loadFailed", value: { retryAfterMs: 2000 } } });
+    vi.advanceTimersByTime(2499);
+    expect(sentCases()).not.toContain("loadRooms");
+
+    vi.advanceTimersByTime(1);
+    expect(sentCases()).toContain("loadRooms");
+    transport.close();
+  });
+
+  it("cancels pending load_rooms and retry_later timers on close", async () => {
+    const { transport, ws, receive } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+    receive({ frame: { case: "loadFailed", value: { retryAfterMs: 2000 } } });
+    receive({ frame: { case: "retryLater", value: { retryAfterMs: 5000 } } });
+
+    transport.close();
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("drops a pending load_rooms once a resync shows the user was reloaded", async () => {
+    const { transport, ws, receive, sentCases } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+    receive({ frame: { case: "ready", value: {} } });
+    receive({ frame: { case: "loadFailed", value: { retryAfterMs: 2000 } } });
+
+    receive({ frame: { case: "resync", value: { reason: 1 } } });
+    vi.advanceTimersByTime(5000);
+
+    expect(sentCases()).not.toContain("loadRooms");
+    transport.close();
+  });
+
+  it("backs off when the socket closes before opening, since browsers hide the handshake status", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { transport, ws, sockets } = setup();
+    transport.connect();
+
+    ws().simulateClose(1006);
+    vi.advanceTimersByTime(999);
+    expect(sockets).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(sockets).toHaveLength(2);
+    transport.close();
+  });
+
+  it("backs off 1s then 2s when getting a token fails instead of reconnecting at once", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      wsUrl: "ws://localhost:8081/ws",
+      getToken: async () => {
+        throw new Error("invalid_grant");
+      },
+      webSocketFactory: (url, proto) => {
+        const ws = new FakeWebSocket(url, proto);
+        sockets.push(ws);
+        return ws as any;
+      },
+    });
+    const flush = async () => {
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+    };
+
+    transport.connect();
+    sockets[0]!.simulateOpen();
+    await flush();
+    expect(transport.status).toBe("disconnected");
+    vi.advanceTimersByTime(999);
+    expect(sockets).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(sockets).toHaveLength(2);
+
+    sockets[1]!.simulateOpen();
+    await flush();
+    vi.advanceTimersByTime(1999);
+    expect(sockets).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(sockets).toHaveLength(3);
     transport.close();
   });
 });

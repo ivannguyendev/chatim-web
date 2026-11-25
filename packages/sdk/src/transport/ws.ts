@@ -4,6 +4,7 @@ import {
   type ClientFrame,
   ClientFrameSchema,
   HeartbeatFrameSchema,
+  LoadRoomsFrameSchema,
   type ServerFrame,
   ServerFrameSchema,
 } from "../gen/chatim/v1/ws_pb";
@@ -15,6 +16,11 @@ export type ConnectionStatus =
   | "waiting_auth"
   | "running";
 
+export const LOAD_ROOMS_JITTER_MS = 1000;
+const DEFAULT_LOAD_ROOMS_RETRY_MS = 1000;
+const DEFAULT_RETRY_LATER_MS = 1000;
+const HANDSHAKE_FAILURE_CODE = 1011;
+
 export interface WebSocketTransportOptions {
   wsUrl: string;
   getToken: () => Promise<string>;
@@ -24,6 +30,7 @@ export interface WebSocketTransportOptions {
 
 export type FrameHandler = (frame: ServerFrame) => void;
 export type StatusHandler = (status: ConnectionStatus) => void;
+export type ReadyHandler = () => void;
 
 export class WebSocketTransport {
   private wsUrl: string;
@@ -35,11 +42,16 @@ export class WebSocketTransport {
   private _status: ConnectionStatus = "disconnected";
   private heartbeatTimer: any = null;
   private reconnectTimer: any = null;
+  private loadRoomsTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryLaterTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private isClosedExplicitly = false;
+  private opened = false;
 
   private frameHandlers: Set<FrameHandler> = new Set();
   private statusHandlers: Set<StatusHandler> = new Set();
+  private readyHandlers: Set<ReadyHandler> = new Set();
+  private resyncHandlers: Set<ReadyHandler> = new Set();
 
   constructor(options: WebSocketTransportOptions) {
     this.wsUrl = options.wsUrl;
@@ -64,6 +76,16 @@ export class WebSocketTransport {
     return () => this.statusHandlers.delete(handler);
   }
 
+  onReady(handler: ReadyHandler) {
+    this.readyHandlers.add(handler);
+    return () => this.readyHandlers.delete(handler);
+  }
+
+  onResync(handler: ReadyHandler) {
+    this.resyncHandlers.add(handler);
+    return () => this.resyncHandlers.delete(handler);
+  }
+
   private setStatus(status: ConnectionStatus) {
     if (this._status !== status) {
       this._status = status;
@@ -75,6 +97,7 @@ export class WebSocketTransport {
 
   connect() {
     this.isClosedExplicitly = false;
+    this.opened = false;
     this.setStatus("connecting");
 
     try {
@@ -91,14 +114,22 @@ export class WebSocketTransport {
   }
 
   private async handleOpen() {
+    this.opened = true;
     this.setStatus("waiting_auth");
+    this.startHeartbeat();
     try {
-      const token = await this.getToken();
-      this.sendAuth(token);
+      this.sendAuth(await this.getToken());
     } catch {
-      this.closeSocket();
-      this.scheduleReconnect(4001);
+      this.failHandshake();
     }
+  }
+
+  private failHandshake() {
+    this.stopHeartbeat();
+    this.clearRetryLaterTimer();
+    this.closeSocket();
+    this.setStatus("disconnected");
+    this.scheduleReconnect(HANDSHAKE_FAILURE_CODE);
   }
 
   sendAuth(token: string) {
@@ -123,22 +154,36 @@ export class WebSocketTransport {
     try {
       const bytes = new Uint8Array(event.data as ArrayBuffer);
       const serverFrame = fromBinary(ServerFrameSchema, bytes);
+      const frame = serverFrame.frame;
+      const becameReady =
+        frame.case === "ready" ||
+        (frame.case === "resync" && this._status === "waiting_auth");
 
-      if (serverFrame.frame.case === "ready") {
+      if (becameReady || frame.case === "resync") {
+        this.clearLoadRoomsTimer();
+      }
+      if (becameReady) {
         this.setStatus("running");
         this.reconnectAttempt = 0;
-        this.startHeartbeat();
-      } else if (serverFrame.frame.case === "retryLater") {
-        const retryAfterMs =
-          Number(serverFrame.frame.value.retryAfterMs) || 1000;
-        setTimeout(async () => {
-          if (this.status === "waiting_auth") {
-            const token = await this.getToken();
-            this.sendAuth(token);
-          }
-        }, retryAfterMs);
+      } else if (frame.case === "retryLater") {
+        this.scheduleRetryAuth(
+          Number(frame.value.retryAfterMs) || DEFAULT_RETRY_LATER_MS,
+        );
+      } else if (frame.case === "loadFailed") {
+        this.scheduleLoadRooms(
+          Number(frame.value.retryAfterMs) || DEFAULT_LOAD_ROOMS_RETRY_MS,
+        );
       }
 
+      if (becameReady) {
+        for (const handler of this.readyHandlers) {
+          handler();
+        }
+      } else if (frame.case === "resync") {
+        for (const handler of this.resyncHandlers) {
+          handler();
+        }
+      }
       for (const handler of this.frameHandlers) {
         handler(serverFrame);
       }
@@ -147,10 +192,12 @@ export class WebSocketTransport {
 
   private handleClose(event: CloseEvent) {
     this.stopHeartbeat();
+    this.clearLoadRoomsTimer();
+    this.clearRetryLaterTimer();
     this.setStatus("disconnected");
 
     if (!this.isClosedExplicitly) {
-      this.scheduleReconnect(event.code);
+      this.scheduleReconnect(this.opened ? event.code : HANDSHAKE_FAILURE_CODE);
     }
   }
 
@@ -164,6 +211,52 @@ export class WebSocketTransport {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
+  }
+
+  private scheduleLoadRooms(retryAfterMs: number) {
+    this.clearLoadRoomsTimer();
+    const delay =
+      retryAfterMs + Math.floor(Math.random() * LOAD_ROOMS_JITTER_MS);
+    this.loadRoomsTimer = setTimeout(() => {
+      this.loadRoomsTimer = null;
+      this.send(
+        create(ClientFrameSchema, {
+          frame: {
+            case: "loadRooms",
+            value: create(LoadRoomsFrameSchema, {}),
+          },
+        }),
+      );
+    }, delay);
+  }
+
+  private clearLoadRoomsTimer() {
+    if (this.loadRoomsTimer) {
+      clearTimeout(this.loadRoomsTimer);
+      this.loadRoomsTimer = null;
+    }
+  }
+
+  private scheduleRetryAuth(retryAfterMs: number) {
+    this.clearRetryLaterTimer();
+    this.retryLaterTimer = setTimeout(async () => {
+      this.retryLaterTimer = null;
+      if (this._status !== "waiting_auth") {
+        return;
+      }
+      try {
+        this.sendAuth(await this.getToken());
+      } catch {
+        this.failHandshake();
+      }
+    }, retryAfterMs);
+  }
+
+  private clearRetryLaterTimer() {
+    if (this.retryLaterTimer) {
+      clearTimeout(this.retryLaterTimer);
+      this.retryLaterTimer = null;
+    }
   }
 
   private startHeartbeat() {
@@ -203,6 +296,8 @@ export class WebSocketTransport {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.clearLoadRoomsTimer();
+    this.clearRetryLaterTimer();
     this.stopHeartbeat();
     this.closeSocket();
     this.setStatus("disconnected");
