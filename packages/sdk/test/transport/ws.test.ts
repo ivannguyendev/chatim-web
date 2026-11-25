@@ -348,4 +348,44 @@ describe("WebSocketTransport", () => {
     expect(vi.getTimerCount()).toBe(1);
     transport.close();
   });
+
+  it("reconnects after a server close even when a status listener throws", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { transport, ws, sockets } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+    transport.onStatusChange(() => {
+      throw new Error("listener failed");
+    });
+
+    ws().simulateClose(1006);
+    vi.advanceTimersByTime(1000);
+
+    expect(sockets).toHaveLength(2);
+    transport.close();
+  });
+
+  it("keeps a single reconnect timer when connecting again fails while a reconnect is pending", () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      wsUrl: "ws://localhost:8081/ws",
+      getToken: async () => "token-123",
+      webSocketFactory: (url, proto) => {
+        if (sockets.length === 1) {
+          throw new Error("blocked");
+        }
+        const ws = new FakeWebSocket(url, proto);
+        sockets.push(ws);
+        return ws as any;
+      },
+    });
+    transport.connect();
+    sockets[0]!.simulateClose(1000);
+
+    transport.connect();
+
+    expect(vi.getTimerCount()).toBe(1);
+    transport.close();
+  });
 });

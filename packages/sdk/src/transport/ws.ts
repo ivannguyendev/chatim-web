@@ -89,9 +89,7 @@ export class WebSocketTransport {
   private setStatus(status: ConnectionStatus) {
     if (this._status !== status) {
       this._status = status;
-      for (const handler of this.statusHandlers) {
-        handler(status);
-      }
+      this.dispatch(this.statusHandlers, status);
     }
   }
 
@@ -227,6 +225,7 @@ export class WebSocketTransport {
   }
 
   private scheduleReconnect(code: number) {
+    this.clearReconnectTimer();
     const delay = getReconnectDelayMs(code, this.reconnectAttempt);
     if (delay === null) {
       return;
@@ -236,6 +235,13 @@ export class WebSocketTransport {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 
   private scheduleLoadRooms(retryAfterMs: number) {
@@ -313,10 +319,7 @@ export class WebSocketTransport {
 
   close() {
     this.isClosedExplicitly = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     this.clearLoadRoomsTimer();
     this.clearRetryLaterTimer();
     this.stopHeartbeat();
