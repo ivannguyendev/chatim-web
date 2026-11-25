@@ -12,6 +12,7 @@ export class TokenManager {
   private inFlightPromise: Promise<string> | null = null;
   private renewTimer: any = null;
   private renewListeners: Set<TokenRenewListener> = new Set();
+  private destroyed = false;
 
   constructor(options: TokenManagerOptions) {
     this.identityUrl = options.identityUrl.replace(/\/$/, "");
@@ -63,6 +64,9 @@ export class TokenManager {
         }
 
         const data = await response.json();
+        if (this.destroyed) {
+          throw new Error("Token manager destroyed");
+        }
         const token = data.access_token as string;
         const expiresIn = (data.expires_in as number) || 300;
 
@@ -83,6 +87,9 @@ export class TokenManager {
   }
 
   private scheduleRenew(expiresInSeconds: number) {
+    if (this.destroyed) {
+      return;
+    }
     if (this.renewTimer) {
       clearTimeout(this.renewTimer);
       this.renewTimer = null;
@@ -92,11 +99,15 @@ export class TokenManager {
     const renewDelayMs = Math.floor(expiresInSeconds * ratio * 1000);
 
     this.renewTimer = setTimeout(() => {
+      if (this.destroyed) {
+        return;
+      }
       this.refreshToken().catch(() => {});
     }, renewDelayMs);
   }
 
   destroy() {
+    this.destroyed = true;
     if (this.renewTimer) {
       clearTimeout(this.renewTimer);
       this.renewTimer = null;

@@ -112,4 +112,33 @@ describe("TokenManager", () => {
   it("rejects a chat token whose claims are not base64url JSON", () => {
     expect(() => readTokenSubject("a.!!.s")).toThrow("Chat token is not a JWT");
   });
+
+  it("drops a token exchange that finishes after destroy", async () => {
+    let resolveSubjectToken: (token: string) => void = () => {};
+    const subjectToken = new Promise<string>((resolve) => {
+      resolveSubjectToken = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "late-token", expires_in: 300 }),
+      }),
+    );
+
+    const tm = new TokenManager({
+      identityUrl: "http://localhost:8084",
+      getSubjectToken: () => subjectToken,
+    });
+    const renewListener = vi.fn();
+    tm.onRenew(renewListener);
+
+    const pending = tm.getToken();
+    tm.destroy();
+    resolveSubjectToken("tenant-jwt");
+
+    await expect(pending).rejects.toThrow("Token manager destroyed");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(renewListener).not.toHaveBeenCalled();
+  });
 });
