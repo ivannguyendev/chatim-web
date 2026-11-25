@@ -4,5 +4,7 @@ export * from "./auth/token";
 export * from "./transport/retry";
 export * from "./transport/ws";
 export * from "./transport/http";
+export * from "./transport/command-tracker";
+export * from "./reads/mark-read-throttle";
 export * from "./directory/batcher";
 export * from "./client";
