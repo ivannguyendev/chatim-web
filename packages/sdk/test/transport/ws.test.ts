@@ -494,4 +494,19 @@ describe("WebSocketTransport", () => {
     expect(transport.status).toBe("waiting_auth");
     transport.close();
   });
+
+  it("reports disconnected before connecting when connect replaces a live socket", async () => {
+    const { transport, ws, receive } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await flush();
+    receive({ frame: { case: "ready", value: {} } });
+    const statuses: string[] = [];
+    transport.onStatusChange((status) => statuses.push(status));
+
+    transport.connect();
+
+    expect(statuses).toEqual(["disconnected", "connecting"]);
+    transport.close();
+  });
 });

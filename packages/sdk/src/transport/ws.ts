@@ -99,10 +99,14 @@ export class WebSocketTransport {
   }
 
   connect() {
+    const replacing = this.ws !== null;
     this.clearReconnectTimer();
     this.releaseSocket();
     this.isClosedExplicitly = false;
     this.opened = false;
+    if (replacing) {
+      this.setStatus("disconnected");
+    }
     this.setStatus("connecting");
 
     try {

@@ -272,4 +272,19 @@ describe("ChatimClient realtime commands", () => {
     await expect(t.client.getMyUserId()).resolves.toBe(LAN_CHAT_USER_ID);
     t.client.close();
   });
+
+  it("rejects in-flight commands with connection_lost when connect replaces the socket", async () => {
+    const t = createTestClient();
+    await t.openAndReady();
+    let failure: unknown;
+    t.client.sendMessage(KHO_HCM, "x", "c-1").catch((error: unknown) => {
+      failure = error;
+    });
+
+    t.client.connect();
+    await flushMicrotasks();
+
+    expect(failure).toMatchObject({ reason: "connection_lost" });
+    t.client.close();
+  });
 });
