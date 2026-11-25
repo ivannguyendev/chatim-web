@@ -88,29 +88,3 @@ export function clearStoredSession(): void {
     return;
   }
 }
-
-function encodeBase64Url(input: string): string {
-  const bytes = new TextEncoder().encode(input);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/g, "");
-}
-
-export function buildDevSubjectToken(userId: string): string {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const header = encodeBase64Url(JSON.stringify({ alg: "none", typ: "JWT" }));
-  const payload = encodeBase64Url(
-    JSON.stringify({
-      sub: userId,
-      aud: "chatim",
-      iat: nowSec,
-      exp: nowSec + 600,
-    }),
-  );
-  return `${header}.${payload}.dev`;
-}

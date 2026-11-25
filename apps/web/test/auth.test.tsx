@@ -1,26 +1,34 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_COPY } from "../src/constants/ui-copy";
 import {
   AUTH_STORAGE_KEY,
   type AuthContextValue,
   AuthProvider,
-  type AuthSession,
   DEV_ACCOUNTS,
   LoginScreen,
   useAuth,
 } from "../src/features/auth";
 
-function decodeBase64UrlJson(segment: string): Record<string, unknown> {
-  const normalized = segment.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4)) % 4),
-    "=",
-  );
-  const binary = atob(padded);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  const json = new TextDecoder().decode(bytes);
-  return JSON.parse(json) as Record<string, unknown>;
+const DEV_TOKEN = "signed.dev.jwt";
+
+const devTokenUrl = (user: string, name: string) =>
+  `/__dev/subject-token?${new URLSearchParams({ user, name })}`;
+
+function stubDevTokenEndpoint(
+  reply: { ok: boolean; status: number; body: string } = {
+    ok: true,
+    status: 200,
+    body: DEV_TOKEN,
+  },
+) {
+  const fetchMock = vi.fn(async () => ({
+    ok: reply.ok,
+    status: reply.status,
+    text: async () => reply.body,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function AuthHarness({
@@ -50,18 +58,19 @@ describe("features/auth", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     window.localStorage.clear();
+    stubDevTokenEndpoint();
   });
 
-  it("logs in via Dev Account Switcher, persists only user identity, generates valid dev JWT, and clears session on logout", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("logs in via Dev Account Switcher, persists only user identity, fetches a signed dev subject token, and clears session on logout", async () => {
+    const fetchMock = stubDevTokenEndpoint();
     const onSessionCleared = vi.fn();
-    let tokenFromOnLoginSuccess = "";
     let latestAuth: AuthContextValue | null = null;
 
-    const onLoginSuccess = vi.fn((_session: AuthSession) => {
-      if (latestAuth) {
-        tokenFromOnLoginSuccess = latestAuth.getSubjectToken();
-      }
-    });
+    const onLoginSuccess = vi.fn();
 
     render(
       <AuthProvider
@@ -108,25 +117,16 @@ describe("features/auth", () => {
     expect(Object.keys(parsedStored).sort()).toEqual(["displayName", "userId"]);
     expect(window.localStorage.length).toBe(0);
 
-    expect(tokenFromOnLoginSuccess.endsWith(".dev")).toBe(true);
-    const token = latestAuth!.getSubjectToken();
-    const parts = token.split(".");
-    expect(parts).toHaveLength(3);
-    expect(parts[2]).toBe("dev");
-
-    const header = decodeBase64UrlJson(parts[0]!);
-    const payload = decodeBase64UrlJson(parts[1]!);
-    expect(header).toEqual({ alg: "none", typ: "JWT" });
-    expect(payload.sub).toBe("lan");
-    expect(payload.aud).toBe("chatim");
-    expect(typeof payload.iat).toBe("number");
-    expect(payload.exp).toBe((payload.iat as number) + 600);
+    await expect(latestAuth!.getSubjectToken()).resolves.toBe(DEV_TOKEN);
+    expect(fetchMock).toHaveBeenCalledWith(devTokenUrl("lan", "Lan Nguyễn"), {
+      cache: "no-store",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: UI_COPY.AUTH.LOGOUT }));
 
     expect(window.sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
     expect(onSessionCleared).toHaveBeenCalledTimes(1);
-    expect(() => latestAuth!.getSubjectToken()).toThrow(
+    await expect(latestAuth!.getSubjectToken()).rejects.toThrow(
       "No active subject token",
     );
     expect(
@@ -134,7 +134,8 @@ describe("features/auth", () => {
     ).toBeDefined();
   });
 
-  it("purges previous session cache via onSessionCleared and resets custom token when switching accounts directly", () => {
+  it("purges previous session cache via onSessionCleared and resets custom token when switching accounts directly", async () => {
+    const fetchMock = stubDevTokenEndpoint();
     const onSessionCleared = vi.fn();
     let latestAuth: AuthContextValue | null = null;
 
@@ -151,7 +152,7 @@ describe("features/auth", () => {
     act(() => {
       latestAuth!.loginWithInput("lan", "lan.custom.jwt");
     });
-    expect(latestAuth!.getSubjectToken()).toBe("lan.custom.jwt");
+    await expect(latestAuth!.getSubjectToken()).resolves.toBe("lan.custom.jwt");
     expect(onSessionCleared).not.toHaveBeenCalled();
 
     act(() => {
@@ -164,13 +165,14 @@ describe("features/auth", () => {
       "Alice Trần",
     );
 
-    const aliceToken = latestAuth!.getSubjectToken();
-    expect(aliceToken).not.toBe("lan.custom.jwt");
-    const alicePayload = decodeBase64UrlJson(aliceToken.split(".")[1]!);
-    expect(alicePayload.sub).toBe("alice");
+    await expect(latestAuth!.getSubjectToken()).resolves.toBe(DEV_TOKEN);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      devTokenUrl("alice", "Alice Trần"),
+      { cache: "no-store" },
+    );
   });
 
-  it("validates blank manual userId and keeps custom subjectToken strictly in memory", () => {
+  it("validates blank manual userId and keeps custom subjectToken strictly in memory", async () => {
     let latestAuth: AuthContextValue | null = null;
 
     render(
@@ -207,7 +209,7 @@ describe("features/auth", () => {
     expect(screen.getByTestId("active-user-id").textContent).toBe(
       "nguyễn_minh",
     );
-    expect(latestAuth!.getSubjectToken()).toBe(
+    await expect(latestAuth!.getSubjectToken()).resolves.toBe(
       "eyJhbGciOiJIUzI1NiJ9.custom.sig",
     );
 
@@ -220,7 +222,7 @@ describe("features/auth", () => {
     });
   });
 
-  it("enforces production mode by ignoring dev sessionStorage, hiding dev switcher, and requiring subjectToken in memory", () => {
+  it("enforces production mode by ignoring dev sessionStorage, hiding dev switcher, and requiring subjectToken in memory", async () => {
     window.sessionStorage.setItem(
       AUTH_STORAGE_KEY,
       JSON.stringify({ userId: "lan", displayName: "Lan Nguyễn" }),
@@ -264,11 +266,13 @@ describe("features/auth", () => {
     fireEvent.click(screen.getByRole("button", { name: UI_COPY.AUTH.SUBMIT }));
 
     expect(screen.getByTestId("active-user-id").textContent).toBe("lan");
-    expect(latestAuth!.getSubjectToken()).toBe("prod.signed.jwt");
+    await expect(latestAuth!.getSubjectToken()).resolves.toBe(
+      "prod.signed.jwt",
+    );
     expect(window.sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
   });
 
-  it("hydrates valid dev session while stripping unknown properties and tolerating corrupted or blocked sessionStorage", () => {
+  it("hydrates valid dev session while stripping unknown properties and tolerating corrupted or blocked sessionStorage", async () => {
     window.sessionStorage.setItem(
       AUTH_STORAGE_KEY,
       JSON.stringify({
@@ -297,7 +301,7 @@ describe("features/auth", () => {
     expect(
       Object.prototype.hasOwnProperty.call(latestAuth!.session, "subjectToken"),
     ).toBe(false);
-    expect(latestAuth!.getSubjectToken()).not.toBe("leaked-token");
+    await expect(latestAuth!.getSubjectToken()).resolves.toBe(DEV_TOKEN);
     unmount();
 
     window.sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(["bob"]));
@@ -339,5 +343,29 @@ describe("features/auth", () => {
 
     getItemSpy.mockRestore();
     setItemSpy.mockRestore();
+  });
+
+  it("surfaces the dev issuer setup hint when the dev token endpoint fails", async () => {
+    stubDevTokenEndpoint({
+      ok: false,
+      status: 503,
+      body: "Dev issuer key missing in /repo/.local/dev-issuer: run `pnpm dev:issuer`",
+    });
+    let latestAuth: AuthContextValue | null = null;
+
+    render(
+      <AuthProvider isProduction={false}>
+        <AuthHarness
+          onReady={(auth) => {
+            latestAuth = auth;
+          }}
+        />
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Lan Nguyễn" }));
+
+    await expect(latestAuth!.getSubjectToken()).rejects.toThrow(
+      /\(503\).*pnpm dev:issuer/,
+    );
   });
 });

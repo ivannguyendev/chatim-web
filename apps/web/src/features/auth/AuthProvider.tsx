@@ -12,11 +12,11 @@ import {
   type AuthSession,
   DEV_ACCOUNTS,
   type DevAccount,
-  buildDevSubjectToken,
   clearStoredSession,
   readStoredSession,
   writeStoredSession,
 } from "./auth-storage";
+import { fetchDevSubjectToken } from "./dev-subject-token";
 
 export type LoginResult =
   | { ok: true }
@@ -31,7 +31,7 @@ export interface AuthContextValue {
     customSubjectToken?: string,
   ) => LoginResult;
   logout: () => void;
-  getSubjectToken: () => string;
+  getSubjectToken: () => Promise<string>;
 }
 
 export interface AuthProviderProps {
@@ -144,12 +144,15 @@ export function AuthProvider({
     onSessionClearedRef.current?.();
   }, []);
 
-  const getSubjectToken = useCallback((): string => {
+  const getSubjectToken = useCallback(async (): Promise<string> => {
     if (customTokenRef.current) {
       return customTokenRef.current;
     }
-    if (!isProduction && sessionRef.current) {
-      return buildDevSubjectToken(sessionRef.current.userId);
+    if (import.meta.env.DEV && !isProduction && sessionRef.current) {
+      return fetchDevSubjectToken(
+        sessionRef.current.userId,
+        sessionRef.current.displayName,
+      );
     }
     throw new Error("No active subject token");
   }, [isProduction]);

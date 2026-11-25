@@ -1,5 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import {
   signDevSubjectToken,
   toDevDisplayName,
 } from "../dev-issuer/dev-issuer-core";
+import { createDevSubjectTokenHandler } from "../dev-issuer/dev-issuer-plugin";
 import {
   type AdminResult,
   registerDevIssuer,
@@ -217,5 +219,83 @@ describe("registerDevIssuer", () => {
     expect(() => registerDevIssuer(broken.admin, key)).toThrow(
       "issuer-add failed: No such container",
     );
+  });
+});
+
+describe("dev subject token middleware", () => {
+  function call(
+    handler: ReturnType<typeof createDevSubjectTokenHandler>,
+    init: {
+      method?: string;
+      url?: string;
+      remoteAddress?: string;
+      host?: string;
+    } = {},
+  ) {
+    const res = {
+      statusCode: 0,
+      headers: {} as Record<string, string>,
+      body: "",
+      setHeader(name: string, value: string) {
+        this.headers[name.toLowerCase()] = value;
+      },
+      end(body?: string) {
+        this.body = body ?? "";
+      },
+    };
+    handler(
+      {
+        method: init.method ?? "GET",
+        url: init.url ?? "/?user=lan",
+        headers: { host: init.host ?? "localhost:3000" },
+        socket: { remoteAddress: init.remoteAddress ?? "127.0.0.1" },
+      } as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+    );
+    return res;
+  }
+
+  it("signs a token with the display name for a loopback GET on a local host", () => {
+    const key = ensureDevIssuerKey(tempKeyDir());
+    const res = call(
+      createDevSubjectTokenHandler(
+        () => key,
+        () => 1_000,
+      ),
+      { url: `/?${new URLSearchParams({ user: "lan", name: "Lan Nguyễn" })}` },
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    const token = verifyDevToken(res.body, key);
+    expect(token.validSignature).toBe(true);
+    expect(token.claims).toMatchObject({
+      sub: "lan",
+      name: "Lan Nguyễn",
+      iat: 1_000,
+    });
+  });
+
+  it("refuses non-loopback callers, foreign Host headers, bad users and other methods", () => {
+    const key = ensureDevIssuerKey(tempKeyDir());
+    const handler = createDevSubjectTokenHandler(() => key);
+
+    expect(call(handler, { remoteAddress: "192.168.1.5" }).statusCode).toBe(
+      403,
+    );
+    expect(call(handler, { host: "rebind.example:3000" }).statusCode).toBe(403);
+    expect(call(handler, { url: "/?user=" }).statusCode).toBe(400);
+    expect(call(handler, { method: "POST" }).statusCode).toBe(405);
+    expect(
+      call(handler, { remoteAddress: "::1", host: "[::1]:3000" }).statusCode,
+    ).toBe(200);
+  });
+
+  it("answers 503 with the setup hint when the key is missing", () => {
+    const dir = tempKeyDir();
+    const res = call(createDevSubjectTokenHandler(() => loadDevIssuerKey(dir)));
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatch(/run `pnpm dev:issuer`/);
   });
 });
