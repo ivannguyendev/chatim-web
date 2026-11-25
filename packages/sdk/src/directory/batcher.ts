@@ -45,7 +45,15 @@ export class DirectoryBatcher {
       throw new Error(`GetMyProfile failed with status ${res.status}`);
     }
 
-    return res.json();
+    const data: unknown = await res.json();
+    const profile =
+      typeof data === "object" && data !== null
+        ? (data as { profile?: unknown }).profile
+        : undefined;
+    if (typeof profile !== "object" || profile === null) {
+      throw new Error("GetMyProfile returned no profile");
+    }
+    return profile as UserProfile;
   }
 
   getUser(userId: string): Promise<UserProfile | null> {

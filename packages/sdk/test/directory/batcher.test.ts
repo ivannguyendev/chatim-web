@@ -39,4 +39,44 @@ describe("DirectoryBatcher", () => {
       }),
     );
   });
+
+  it("unwraps the profile returned by GetMyProfile", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        profile: { id: "2kt8hN7mG6L", displayName: "Lan Nguyễn" },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const batcher = new DirectoryBatcher({
+      identityUrl: "http://localhost:8084",
+      getToken: async () => "token-1",
+    });
+
+    await expect(batcher.getMyProfile()).resolves.toEqual({
+      id: "2kt8hN7mG6L",
+      displayName: "Lan Nguyễn",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8084/chatim.identity.v1.DirectoryService/GetMyProfile",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("rejects when GetMyProfile returns no profile", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+    );
+
+    const batcher = new DirectoryBatcher({
+      identityUrl: "http://localhost:8084",
+      getToken: async () => "token-1",
+    });
+
+    await expect(batcher.getMyProfile()).rejects.toThrow(
+      "GetMyProfile returned no profile",
+    );
+  });
 });
