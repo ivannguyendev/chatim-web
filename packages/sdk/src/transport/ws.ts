@@ -94,6 +94,7 @@ export class WebSocketTransport {
   }
 
   connect() {
+    this.clearReconnectTimer();
     this.isClosedExplicitly = false;
     this.opened = false;
     this.setStatus("connecting");

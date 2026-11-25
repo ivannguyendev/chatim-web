@@ -388,4 +388,19 @@ describe("WebSocketTransport", () => {
     expect(vi.getTimerCount()).toBe(1);
     transport.close();
   });
+
+  it("cancels a pending reconnect when connect is called during the backoff", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const { transport, ws, sockets } = setup();
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+    ws().simulateClose(1000);
+
+    transport.connect();
+    vi.advanceTimersByTime(3000);
+
+    expect(sockets).toHaveLength(2);
+    transport.close();
+  });
 });
