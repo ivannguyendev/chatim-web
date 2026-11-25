@@ -44,7 +44,8 @@
 ### Trong phạm vi
 1. **Đã xong (Task 1–4):** UI copy, `timers.ts`, router, mô hình dữ liệu và key cache, `AuthProvider`/`LoginScreen`, `ChatimProvider` vá cache realtime.
 2. **Làm lại ở Task 1–4 sau P3a:**
-   - `userId` của app lấy từ `client.myUserId` (key cache, so người gửi, tìm người đối diện trong DM).
+   - `userId` của app lấy từ `await client.getMyUserId()` (key cache, so người gửi, tìm người đối diện trong DM).
+   - `ChatimClientAdapter` khai `sendMessage(): Promise<SentMessage>` và thêm `markRead`, `getMyUserId` (hiện adapter bỏ Promise → lỗi thành unhandled rejection); thêm `<main>` cho shell.
    - `TYPING_EXPIRE_MS` = 6000.
    - Sau mỗi `ready`: tải lại danh sách phòng và lịch sử phòng đang xem.
    - `resync`: tải lại mọi lịch sử đang có trong cache.
@@ -84,7 +85,7 @@
 
 1. `pnpm lint`, typecheck, `pnpm test`, `pnpm build` đều xanh. Text giao diện chỉ lấy từ `ui-copy.ts`; test so đúng hằng số.
 2. Test thành phần:
-   - Phòng có tin của chính mình từ thiết bị khác (cùng `myUserId`) → badge không tăng.
+   - Phòng có tin của chính mình từ thiết bị khác (cùng `getMyUserId()`) → badge không tăng.
    - DM chọn đúng người đối diện.
    - Response lỗi → "Lỗi · Thử lại"; bấm Thử lại → gửi lại cùng `cid`.
    - Typing tắt sau 6s (fake timers).
@@ -114,4 +115,4 @@
 | Tin realtime đến trước hoặc trùng với kết quả `GetHistory` | Gộp theo `cid` và seq; tin chưa có seq đứng cuối |
 | Rò rỉ timer typing hoặc subscription khi đổi phòng, đăng xuất | Dọn trong cleanup; test bằng fake timers |
 | Badge tăng ở client (+1 khi có tin ở phòng khác) lệch số server | `ListMyRooms` là nguồn đúng; bị ghi đè khi tải lại |
-| Đổi `userId` sang `myUserId` làm vỡ key cache đã có | Key cache tạo sau khi đổi token xong; đăng xuất xoá toàn bộ cache |
+| Đổi `userId` sang `getMyUserId()` làm vỡ key cache đã có | Key cache tạo sau khi đổi token xong; đăng xuất xoá toàn bộ cache |
