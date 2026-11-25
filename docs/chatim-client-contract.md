@@ -55,7 +55,7 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
 | Frame | Client làm gì | Nguồn |
 |---|---|---|
 | `ready` | Sau **mọi** `ready` (kết nối mới, hoặc sau `auth_required` trên cùng kết nối): gửi lại `open_room` các room đang xem và `watch_presence` đầy đủ, rồi tải lại `ListMyRooms` + `GetHistory` room đang xem | F09:476, :495 |
-| `resync` khi đang chạy | Chỉ tải lại qua HTTPS; không gửi lại `open_room`/`watch_presence` (xem §8, chưa chốt) | F09:479, :496 |
+| `resync` khi đang chạy | Tải lại qua HTTPS và gửi lại `open_room` các room đang xem; không gửi lại `watch_presence` (server vẫn nhớ, F09:479). Xem §8. | F09:479, :496 |
 | `resync` trước `ready` | Coi như `ready` | F09:479, :495 |
 | `load_failed{retry_after_ms}` | Kết nối giữ, user tạm ngừng (không event, không `ready`, lệnh vẫn chạy), server không tự nạp lại → gửi `load_rooms` sau `retry_after_ms` cộng jitter, hoặc nối lại | F09:331, :481, :498 |
 | `retry_later{retry_after_ms}` | Chờ đúng `retry_after_ms` rồi gửi lại `auth` | F09:484 |
@@ -66,7 +66,7 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
 
 - `open_room` nhận thêm event mức room (react, ghim, số thành viên, vai trò, `read_positions` của người khác, typing). `msg_created`/`msg_edited`/`msg_deleted`/`room_updated` tới mọi thành viên dù room mở hay không (F09:317, :482; `docs/events.md:90–98`).
 - `open_room` gửi trước `ready`, khi tạm ngừng hoặc sau `load_failed` bị bỏ qua, không trả lời; máy mở lại các room đang xem sau `ready`/`resync`. Không phải thành viên → `room_closed{NOT_MEMBER}` sau tối đa 10s. Không giới hạn số room mở. `close_room` luôn chạy, không trả lời (F09:317–319; `apps/websocket/internal/interest/conn.go:77–91`).
-- Chưa chốt: F09:317 nói mở lại sau `resync`, F09:496 nói không gửi lại; `open_room` lặp là no-op ở server (`apps/websocket/internal/interest/conn.go:78–80`); owner đang quyết.
+- Chốt (owner 2026-11-25): lúc user bị tạm ngừng, server bỏ `open_room` mà không báo (F09:317, :330; `apps/websocket/internal/interest/conn.go:36`), nên sau mỗi `resync` client gửi lại `open_room` các room đang xem; `open_room` lặp là no-op ở server (`apps/websocket/internal/interest/conn.go:78–80`). F09:496 chỉ đúng với room mở trước khi tạm ngừng.
 
 ## 9. Presence
 
