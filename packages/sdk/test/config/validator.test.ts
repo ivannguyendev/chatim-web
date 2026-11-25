@@ -44,6 +44,15 @@ describe("Client Config Validator (Ops Enforced in Code)", () => {
     ).toThrow(/markReadIntervalMs \(500ms\) must be at least 1000ms/);
   });
 
+  it("should throw if markReadIntervalMs is NaN", () => {
+    expect(() =>
+      validateClientConfig({
+        ...DEFAULT_CLIENT_CONFIG,
+        markReadIntervalMs: Number.NaN,
+      }),
+    ).toThrow(/markReadIntervalMs \(NaNms\) must be at least 1000ms/);
+  });
+
   it("should throw if commandTimeoutMs is not positive", () => {
     expect(() =>
       validateClientConfig({

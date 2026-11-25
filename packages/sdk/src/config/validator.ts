@@ -41,7 +41,7 @@ export function validateClientConfig(config: ClientConfig): ClientConfig {
     );
   }
 
-  if (config.markReadIntervalMs < SERVER_MARK_READ_MIN_INTERVAL_MS) {
+  if (!(config.markReadIntervalMs >= SERVER_MARK_READ_MIN_INTERVAL_MS)) {
     throw new Error(
       `markReadIntervalMs (${config.markReadIntervalMs}ms) must be at least ${SERVER_MARK_READ_MIN_INTERVAL_MS}ms: the server accepts one MarkRead per second per room`,
     );

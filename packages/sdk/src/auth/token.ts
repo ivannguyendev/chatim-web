@@ -116,8 +116,13 @@ export function readTokenSubject(token: string): string {
     base64.length + ((4 - (base64.length % 4)) % 4),
     "=",
   );
-  const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
-  const claims: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  let claims: unknown;
+  try {
+    const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+    claims = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error("Chat token is not a JWT");
+  }
   const subject =
     typeof claims === "object" && claims !== null
       ? (claims as { sub?: unknown }).sub

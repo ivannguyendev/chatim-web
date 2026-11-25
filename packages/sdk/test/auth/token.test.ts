@@ -108,4 +108,8 @@ describe("TokenManager", () => {
     );
     expect(() => readTokenSubject("opaque")).toThrow("Chat token is not a JWT");
   });
+
+  it("rejects a chat token whose claims are not base64url JSON", () => {
+    expect(() => readTokenSubject("a.!!.s")).toThrow("Chat token is not a JWT");
+  });
 });
