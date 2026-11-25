@@ -117,19 +117,38 @@ export class WebSocketTransport {
     this.opened = true;
     this.setStatus("waiting_auth");
     this.startHeartbeat();
+    await this.authenticate();
+  }
+
+  private async authenticate() {
+    const socket = this.ws;
     try {
-      this.sendAuth(await this.getToken());
+      const token = await this.getToken();
+      if (this.isStale(socket)) {
+        return;
+      }
+      this.sendAuth(token);
     } catch {
+      if (this.isStale(socket)) {
+        return;
+      }
       this.failHandshake();
     }
   }
 
+  private isStale(socket: WebSocket | null) {
+    return this.ws !== socket || this.isClosedExplicitly;
+  }
+
   private failHandshake() {
     this.stopHeartbeat();
+    this.clearLoadRoomsTimer();
     this.clearRetryLaterTimer();
     this.closeSocket();
     this.setStatus("disconnected");
-    this.scheduleReconnect(HANDSHAKE_FAILURE_CODE);
+    if (!this.isClosedExplicitly) {
+      this.scheduleReconnect(HANDSHAKE_FAILURE_CODE);
+    }
   }
 
   sendAuth(token: string) {
@@ -176,21 +195,27 @@ export class WebSocketTransport {
       }
 
       if (becameReady) {
-        for (const handler of this.readyHandlers) {
-          handler();
-        }
+        this.dispatch(this.readyHandlers);
       } else if (frame.case === "resync") {
-        for (const handler of this.resyncHandlers) {
-          handler();
-        }
+        this.dispatch(this.resyncHandlers);
       }
-      for (const handler of this.frameHandlers) {
-        handler(serverFrame);
-      }
+      this.dispatch(this.frameHandlers, serverFrame);
     } catch {}
   }
 
+  private dispatch<A extends unknown[]>(
+    handlers: Iterable<(...args: A) => void>,
+    ...args: A
+  ) {
+    for (const handler of handlers) {
+      try {
+        handler(...args);
+      } catch {}
+    }
+  }
+
   private handleClose(event: CloseEvent) {
+    this.ws = null;
     this.stopHeartbeat();
     this.clearLoadRoomsTimer();
     this.clearRetryLaterTimer();
@@ -244,11 +269,7 @@ export class WebSocketTransport {
       if (this._status !== "waiting_auth") {
         return;
       }
-      try {
-        this.sendAuth(await this.getToken());
-      } catch {
-        this.failHandshake();
-      }
+      await this.authenticate();
     }, retryAfterMs);
   }
 

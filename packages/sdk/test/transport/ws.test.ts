@@ -89,11 +89,29 @@ describe("WebSocketTransport", () => {
     transport.close();
   });
 
-  function setup() {
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+  };
+
+  function deferredTokens() {
+    const pending: Array<{
+      resolve: (token: string) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const getToken = () =>
+      new Promise<string>((resolve, reject) => {
+        pending.push({ resolve, reject });
+      });
+    return { getToken, pending };
+  }
+
+  function setup(getToken: () => Promise<string> = async () => "token-123") {
     const sockets: FakeWebSocket[] = [];
     const transport = new WebSocketTransport({
       wsUrl: "ws://localhost:8081/ws",
-      getToken: async () => "token-123",
+      getToken,
       webSocketFactory: (url, proto) => {
         const ws = new FakeWebSocket(url, proto);
         sockets.push(ws);
@@ -223,12 +241,6 @@ describe("WebSocketTransport", () => {
         return ws as any;
       },
     });
-    const flush = async () => {
-      for (let i = 0; i < 5; i++) {
-        await Promise.resolve();
-      }
-    };
-
     transport.connect();
     sockets[0]!.simulateOpen();
     await flush();
@@ -244,6 +256,96 @@ describe("WebSocketTransport", () => {
     expect(sockets).toHaveLength(2);
     vi.advanceTimersByTime(1);
     expect(sockets).toHaveLength(3);
+    transport.close();
+  });
+
+  it("ignores a token failure that arrives after close", async () => {
+    const tokens = deferredTokens();
+    const { transport, ws, sockets } = setup(tokens.getToken);
+    transport.connect();
+    ws().simulateOpen();
+    transport.close();
+
+    tokens.pending[0]!.reject(new Error("invalid_grant"));
+    await flush();
+    vi.advanceTimersByTime(60000);
+
+    expect(sockets).toHaveLength(1);
+    expect(transport.status).toBe("disconnected");
+  });
+
+  it("sends only the new socket's auth when the old token arrives after reconnecting", async () => {
+    const tokens = deferredTokens();
+    const { transport, ws, sentCases } = setup(tokens.getToken);
+    transport.connect();
+    ws().simulateOpen();
+    transport.close();
+    transport.connect();
+    ws().simulateOpen();
+
+    tokens.pending[1]!.resolve("token-new");
+    tokens.pending[0]!.resolve("token-old");
+    await flush();
+
+    expect(sentCases()).toEqual(["auth"]);
+    expect(
+      fromBinary(ClientFrameSchema, ws().sentData[0] as Uint8Array).frame,
+    ).toMatchObject({ case: "auth", value: { token: "token-new" } });
+    transport.close();
+  });
+
+  it("schedules a single reconnect when a token failure follows a server close", async () => {
+    const tokens = deferredTokens();
+    const { transport, ws, sockets } = setup(tokens.getToken);
+    transport.connect();
+    ws().simulateOpen();
+    ws().simulateClose(1000);
+
+    tokens.pending[0]!.reject(new Error("invalid_grant"));
+    await flush();
+    vi.advanceTimersByTime(60000);
+
+    expect(sockets).toHaveLength(2);
+    transport.close();
+  });
+
+  it("keeps notifying listeners and dispatching the frame when a ready listener throws", async () => {
+    const { transport, ws, receive } = setup();
+    const nextReady = vi.fn();
+    const onFrame = vi.fn();
+    transport.onReady(() => {
+      throw new Error("listener failed");
+    });
+    transport.onReady(nextReady);
+    transport.onFrame(onFrame);
+    transport.connect();
+    ws().simulateOpen();
+    await Promise.resolve();
+
+    receive({ frame: { case: "ready", value: {} } });
+
+    expect(transport.status).toBe("running");
+    expect(nextReady).toHaveBeenCalledTimes(1);
+    expect(onFrame).toHaveBeenCalledTimes(1);
+    transport.close();
+  });
+
+  it("clears a pending load_rooms when the handshake fails, leaving only the reconnect timer", async () => {
+    const tokens = deferredTokens();
+    const { transport, ws, receive } = setup(tokens.getToken);
+    transport.connect();
+    ws().simulateOpen();
+    tokens.pending[0]!.resolve("token-123");
+    await flush();
+    receive({ frame: { case: "loadFailed", value: { retryAfterMs: 2000 } } });
+    receive({ frame: { case: "retryLater", value: { retryAfterMs: 100 } } });
+
+    vi.advanceTimersByTime(100);
+    tokens.pending[1]!.reject(new Error("invalid_grant"));
+    await flush();
+
+    expect(transport.status).toBe("disconnected");
+    expect(vi.getTimerCount()).toBe(1);
     transport.close();
   });
 });
