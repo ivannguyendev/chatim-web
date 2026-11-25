@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TokenManager } from "../../src/auth/token";
+import { TokenManager, readTokenSubject } from "../../src/auth/token";
 
 describe("TokenManager", () => {
   beforeEach(() => {
@@ -75,5 +75,37 @@ describe("TokenManager", () => {
     expect(renewedToken).toBe("token-2");
 
     tm.destroy();
+  });
+
+  it("reads the chat user id from the sub claim of the exchanged token", async () => {
+    const claims = btoa(JSON.stringify({ sub: "409BKeLbOoM", exp: 1 }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: `e30.${claims}.sig`,
+          expires_in: 300,
+        }),
+      }),
+    );
+
+    const tm = new TokenManager({
+      identityUrl: "http://localhost:8084",
+      getSubjectToken: async () => "tenant-jwt",
+    });
+
+    await expect(tm.getMyUserId()).resolves.toBe("409BKeLbOoM");
+    tm.destroy();
+  });
+
+  it("rejects a chat token without a sub claim", () => {
+    expect(() => readTokenSubject("e30.e30.sig")).toThrow(
+      "Chat token has no sub claim",
+    );
+    expect(() => readTokenSubject("opaque")).toThrow("Chat token is not a JWT");
   });
 });

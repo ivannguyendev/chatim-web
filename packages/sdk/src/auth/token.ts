@@ -30,6 +30,10 @@ export class TokenManager {
     return this.refreshToken();
   }
 
+  async getMyUserId(): Promise<string> {
+    return readTokenSubject(await this.getToken());
+  }
+
   async refreshToken(): Promise<string> {
     if (this.inFlightPromise) {
       return this.inFlightPromise;
@@ -100,4 +104,26 @@ export class TokenManager {
     this.renewListeners.clear();
     this.currentToken = null;
   }
+}
+
+export function readTokenSubject(token: string): string {
+  const encodedClaims = token.split(".")[1];
+  if (!encodedClaims) {
+    throw new Error("Chat token is not a JWT");
+  }
+  const base64 = encodedClaims.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(
+    base64.length + ((4 - (base64.length % 4)) % 4),
+    "=",
+  );
+  const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+  const claims: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  const subject =
+    typeof claims === "object" && claims !== null
+      ? (claims as { sub?: unknown }).sub
+      : undefined;
+  if (typeof subject !== "string" || subject.length === 0) {
+    throw new Error("Chat token has no sub claim");
+  }
+  return subject;
 }
