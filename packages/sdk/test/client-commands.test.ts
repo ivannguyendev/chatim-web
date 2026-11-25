@@ -131,6 +131,23 @@ describe("ChatimClient realtime commands", () => {
     t.client.close();
   });
 
+  it("sends neither typing nor close_room before ready and does not replay a room closed while waiting", async () => {
+    const t = createTestClient();
+    t.client.connect();
+    t.socket().simulateOpen();
+    await flushMicrotasks();
+
+    t.client.openRoom(KHO_HCM);
+    t.client.sendTyping(KHO_HCM);
+    t.client.sendTyping(KHO_HCM, true);
+    t.client.closeRoom(KHO_HCM);
+    expect(t.sent().map((f) => f.frame.case)).toEqual(["auth"]);
+
+    t.receive({ frame: { case: "ready", value: {} } });
+    expect(t.sent().map((f) => f.frame.case)).toEqual(["auth"]);
+    t.client.close();
+  });
+
   it("re-sends open rooms and the watch list after every ready, and only open rooms after resync", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const t = createTestClient();

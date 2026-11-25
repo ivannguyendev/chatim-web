@@ -164,6 +164,9 @@ export class ChatimClient {
   }
 
   sendTyping(roomId: string, stopped = false) {
+    if (this.wsTransport.status !== "running") {
+      return;
+    }
     this.wsTransport.send(
       create(ClientFrameSchema, {
         frame: {
@@ -184,6 +187,9 @@ export class ChatimClient {
   closeRoom(roomId: string) {
     this.reads.flush(roomId);
     this.openRooms.delete(roomId);
+    if (this.wsTransport.status !== "running") {
+      return;
+    }
     this.wsTransport.send(
       create(ClientFrameSchema, {
         frame: {
