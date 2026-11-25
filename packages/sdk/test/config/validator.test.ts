@@ -28,4 +28,28 @@ describe("Client Config Validator (Ops Enforced in Code)", () => {
       }),
     ).toThrow(/tokenRenewRatio.*between 0.70 and 0.85/);
   });
+
+  it("should default commandTimeoutMs to 10000 and markReadIntervalMs to 1000", () => {
+    const config = validateClientConfig(DEFAULT_CLIENT_CONFIG);
+    expect(config.commandTimeoutMs).toBe(10000);
+    expect(config.markReadIntervalMs).toBe(1000);
+  });
+
+  it("should throw if markReadIntervalMs is below one MarkRead per second", () => {
+    expect(() =>
+      validateClientConfig({
+        ...DEFAULT_CLIENT_CONFIG,
+        markReadIntervalMs: 500,
+      }),
+    ).toThrow(/markReadIntervalMs \(500ms\) must be at least 1000ms/);
+  });
+
+  it("should throw if commandTimeoutMs is not positive", () => {
+    expect(() =>
+      validateClientConfig({
+        ...DEFAULT_CLIENT_CONFIG,
+        commandTimeoutMs: 0,
+      }),
+    ).toThrow(/commandTimeoutMs \(0ms\) must be greater than 0/);
+  });
 });
