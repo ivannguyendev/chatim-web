@@ -29,19 +29,22 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
 
 ## 4. CORS dev
 
-- Gateway và identity chỉ nhận trình duyệt từ `APP_CORS_ORIGINS`; compose dev đặt `http://localhost:3000`, không `*`, không cookie (gateway.md:25, :36; identity.md:31; `docs/features/11-feature-https-gateway.md:51`; compose :86, :412).
+- Gateway và identity chỉ nhận trình duyệt từ `APP_CORS_ORIGINS`; compose dev đặt `http://localhost:3000`, không `*`, không cookie (gateway.md:25, :36; identity.md:31; `docs/features/11-feature-https-gateway.md:51`; `pkg/core/httpcors/cors.go:33–58`, dùng ở identity `apps/identity/internal/api/server.go:87`; compose :86, :412).
 
 ## 5. WebSocket
 
 - Subprotocol `chatim.v1`; chỉ frame nhị phân protobuf `ClientFrame`/`ServerFrame`; frame > 128 KB → đóng 1009 (F09:439, :522).
 - Gửi `heartbeat` mỗi 5–10 giây suốt đời kết nối, **ở cả hai trạng thái**; 15 giây không có frame → server đóng 1000 (F09:441).
-- Nối lại theo mã đóng: 1001 → 0–60s; 1000/1006 → 0–3s; 4009 → 30–60s; 4001 → đổi token mới trước; 4003 → không tự nối; bắt tay lỗi, 503 và mã khác (1002, 1011, 1013) → chờ tăng dần 1s, 2s, 4s… tối đa 60s. Không nối lại vì `auth_required`, `retry_later`, `frame_error` (F09:492).
+- Nối lại theo mã đóng: 1001 → 0–60s; 1000/1006 → 0–3s; 4009 → 30–60s; 4001 → đổi token mới trước; 4003 → không tự nối; bắt tay lỗi, 503 và mọi mã khác, ví dụ 1002, 1009, 1011, 1013 → chờ tăng dần 1s, 2s, 4s… tối đa 60s. Không nối lại vì `auth_required`, `retry_later`, `frame_error` (F09:492).
+- Trình duyệt không thấy mã HTTP: socket đóng trước `open` (báo 1006) = bắt tay lỗi → chờ tăng dần; 1006 sau `open` → 0–3s. Server trả 503 lúc bắt tay khi node đang tắt hoặc đã đủ `WS_UNAUTH_MAX` kết nối chờ (F09:440, :492).
+- Lúc nào đặt lại bộ đếm chờ tăng dần là client tự chọn (F09:492 không quy định); SDK đặt lại khi nhận `ready`.
 
 ## 6. Lệnh và trả lời
 
 - `request{id, <lệnh>}` → `response{id, code, message, result}` cùng `id`; `id` do client đặt, server không kiểm trùng; `code` là mã gRPC, 0 = OK (F09:274).
-- Chỉ 11 lệnh ghi realtime đi WebSocket (`SendMessage`, `MarkRead`, …); đọc và quản lý đi HTTPS (F09:275).
-- `SendMessage`/`MarkRead`/`MarkUnread` cùng kết nối, cùng room chạy lần lượt; một `SendMessage` lỗi `UNAVAILABLE`/`DEADLINE_EXCEEDED`/`CANCELED` làm các lệnh chờ phía sau của room đó lỗi theo; client gửi lại theo đúng thứ tự (F09:281).
+- Chỉ 11 lệnh ghi realtime đi WebSocket: `SendMessage`, `EditMessage`, `DeleteMessage`, `ReactMessage`, `PinMessage`, `UnpinMessage`, `SetBookmark`, `MarkRead`, `MarkUnread`, `ClearHistory`, `SetRoomPreferences`; đọc và quản lý đi HTTPS (F09:275).
+- Server gọi chat một lần mỗi lệnh, hạn `CHAT_REQUEST_DEADLINE` (5s), không tự gửi lại; timeout lệnh phía client không được ngắn hơn 5s (F09:279).
+- `SendMessage`/`MarkRead`/`MarkUnread` cùng kết nối, cùng room chạy lần lượt; một `SendMessage` lỗi `UNAVAILABLE`/`DEADLINE_EXCEEDED`/`CANCELED` làm các lệnh chờ phía sau của room đó lỗi theo; nếu gửi lại thì cùng `cid`, đúng thứ tự; `MarkRead`/`MarkUnread` lỗi không kéo lệnh sau (F09:281, :475).
 - `RESOURCE_EXHAUSTED`: chậm lại (50 frame/s, 32 lệnh đang bay) (F09:475, :520–521).
 - Lệnh chưa có trả lời lúc rớt kết nối: không tự gửi lại, kết quả chưa rõ; gửi lại thì dùng cùng `cid` (chống trùng 15 phút) (F09:494).
 - `response` có thể bị bỏ khi hàng gửi đầy → client tự quá hạn lệnh (F09:532).
@@ -52,16 +55,18 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
 | Frame | Client làm gì | Nguồn |
 |---|---|---|
 | `ready` | Sau **mọi** `ready` (kết nối mới, hoặc sau `auth_required` trên cùng kết nối): gửi lại `open_room` các room đang xem và `watch_presence` đầy đủ, rồi tải lại `ListMyRooms` + `GetHistory` room đang xem | F09:476, :495 |
-| `resync` khi đang chạy | Chỉ tải lại qua HTTPS; không gửi lại `open_room`/`watch_presence` | F09:479, :496 |
+| `resync` khi đang chạy | Chỉ tải lại qua HTTPS; không gửi lại `open_room`/`watch_presence` (xem §8, chưa chốt) | F09:479, :496 |
 | `resync` trước `ready` | Coi như `ready` | F09:479, :495 |
 | `load_failed{retry_after_ms}` | Kết nối giữ, user tạm ngừng (không event, không `ready`, lệnh vẫn chạy), server không tự nạp lại → gửi `load_rooms` sau `retry_after_ms` cộng jitter, hoặc nối lại | F09:331, :481, :498 |
 | `retry_later{retry_after_ms}` | Chờ đúng `retry_after_ms` rồi gửi lại `auth` | F09:484 |
 | `room_closed{room_id, reason}` | Đóng màn hình room | F09:480 |
+| `auth_required{reason}` | **Ngoài phạm vi P3a.** `MISSING`/`EXPIRED`: gửi `auth` với token còn hạn. `INVALID`: lấy token đúng của đúng người; đổi người thì mở kết nối mới. `REVOKED`: lấy token tenant mới, đổi một lần qua `POST /v1/token`; bị từ chối (`invalid_grant`) thì về màn hình đăng nhập. Giá trị lạ xử như `INVALID` | F09:485 |
 
 ## 8. Room đang mở
 
 - `open_room` nhận thêm event mức room (react, ghim, số thành viên, vai trò, `read_positions` của người khác, typing). `msg_created`/`msg_edited`/`msg_deleted`/`room_updated` tới mọi thành viên dù room mở hay không (F09:317, :482; `docs/events.md:90–98`).
-- `open_room` gửi trước `ready`, khi tạm ngừng hoặc sau `load_failed` bị bỏ qua, không trả lời. Không phải thành viên → `room_closed{NOT_MEMBER}` sau tối đa 10s. Không giới hạn số room mở. `close_room` luôn chạy, không trả lời (F09:317–319; `apps/websocket/internal/interest/conn.go:77–91`).
+- `open_room` gửi trước `ready`, khi tạm ngừng hoặc sau `load_failed` bị bỏ qua, không trả lời; máy mở lại các room đang xem sau `ready`/`resync`. Không phải thành viên → `room_closed{NOT_MEMBER}` sau tối đa 10s. Không giới hạn số room mở. `close_room` luôn chạy, không trả lời (F09:317–319; `apps/websocket/internal/interest/conn.go:77–91`).
+- Chưa chốt: F09:317 nói mở lại sau `resync`, F09:496 nói không gửi lại; `open_room` lặp là no-op ở server (`apps/websocket/internal/interest/conn.go:78–80`); owner đang quyết.
 
 ## 9. Presence
 
@@ -81,7 +86,7 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
   - tối đa 1 lần/giây mỗi room: lần đầu của room đang yên gửi ngay, sau đó gửi seq lớn nhất đang chờ;
   - `MarkUnread` huỷ `MarkRead` đang chờ;
   - gửi phần đang chờ trước `close_room`;
-  - chờ trả lời mọi `MarkRead` đang gửi rồi mới gọi `ListMyRooms`.
+  - chờ trả lời mọi `MarkRead` đã gửi mà chưa có `response` rồi mới gọi `ListMyRooms`.
 
 ## 12. HTTPS
 
