@@ -54,13 +54,13 @@ function verifyDevToken(token: string, key: DevIssuerKey) {
   };
 }
 
-describe("dev issuer key and token", () => {
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(join(dir, ".."), { recursive: true, force: true });
-    }
-  });
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(join(dir, ".."), { recursive: true, force: true });
+  }
+});
 
+describe("dev issuer key and token", () => {
   it("creates a private ES256 key once with owner-only permissions and a stable kid", () => {
     const dir = tempKeyDir();
 
