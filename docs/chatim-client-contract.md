@@ -23,7 +23,8 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
 ## 3. Đăng ký issuer dev
 
 - Gọi lệnh admin: `docker exec chatim-identity-1 /app <lệnh>` (`Makefile:121–122`, `scripts/e2e-identity-exchange.sh:4–21`).
-- `tenant-create -id -name`, `issuer-add -issuer -tenant`, `issuer-key-add -issuer -kid -alg ES256 -jwk '<JWK công khai có kid, alg, use>'`, `issuer-keys -issuer` (bảng `KID ALG STATE CREATED_AT`) (identity.md:103–142).
+- `tenant-create -id -name`, `issuer-add -issuer -tenant`, `issuer-key-add -issuer -kid -alg ES256 -jwk '<JWK công khai>'`, `issuer-keys -issuer` (bảng `KID ALG STATE CREATED_AT`) (identity.md:103–142).
+- JWK ta gửi có `kid`, `alg`, `use`. Với identity cả ba không bắt buộc, nhưng có thì phải khớp: `kid` = `-kid`, `alg` = `-alg`, `use` = `sig`; lệch thì lệnh thoát 1, không ghi gì (identity.md:116; `apps/identity/internal/trust/jwk.go:72–79`; `apps/identity/internal/admincmd/trust.go:176–187`).
 - Identity nạp lại issuer/khoá ngay khi đổi (change stream), lưới an toàn `IDENTITY_TRUST_RELOAD` = 10s (identity.md:24).
 
 ## 4. CORS dev
@@ -34,7 +35,7 @@ Chép từ repo `chatim` tại commit `cb08e861` (2026-11-25); chỉ gồm luậ
 
 - Subprotocol `chatim.v1`; chỉ frame nhị phân protobuf `ClientFrame`/`ServerFrame`; frame > 128 KB → đóng 1009 (F09:439, :522).
 - Gửi `heartbeat` mỗi 5–10 giây suốt đời kết nối, **ở cả hai trạng thái**; 15 giây không có frame → server đóng 1000 (F09:441).
-- Nối lại theo mã đóng: 1001 → 0–60s; 1000/1006 → 0–3s; 4009 → 30–60s; 4001 → đổi token mới trước; 4003 → không tự nối. Không nối lại vì `auth_required`, `retry_later`, `frame_error` (F09:492).
+- Nối lại theo mã đóng: 1001 → 0–60s; 1000/1006 → 0–3s; 4009 → 30–60s; 4001 → đổi token mới trước; 4003 → không tự nối; bắt tay lỗi, 503 và mã khác (1002, 1011, 1013) → chờ tăng dần 1s, 2s, 4s… tối đa 60s. Không nối lại vì `auth_required`, `retry_later`, `frame_error` (F09:492).
 
 ## 6. Lệnh và trả lời
 
