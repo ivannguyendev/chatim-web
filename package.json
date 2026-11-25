@@ -11,7 +11,11 @@
     "test": "pnpm -r test",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "codegen": "pnpm --filter @chatim/sdk codegen"
+    "codegen": "pnpm --filter @chatim/sdk codegen",
+    "dev:issuer": "node apps/web/dev-issuer/setup-dev-issuer.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
