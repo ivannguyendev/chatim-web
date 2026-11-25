@@ -1,41 +1,73 @@
-import { SDK_VERSION } from "@chatim/sdk";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type React from "react";
-import { useState } from "react";
+import type { ChatimClientOptions } from "@chatim/sdk";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { type FC, useState } from "react";
 import { UI_COPY } from "../constants/ui-copy";
+import { AuthProvider, LoginScreen, useAuth } from "../features/auth";
+import { ConnectionBanner } from "../features/shell/components/ConnectionBanner";
 import {
-  ConnectionBanner,
-  type ConnectionStatus,
-} from "../features/shell/components/ConnectionBanner";
+  type ChatimClientAdapter,
+  ChatimProvider,
+  useConnectionStatus,
+} from "../lib/chatim-provider";
+import { createAppQueryClient } from "../lib/query-client";
 
-const queryClient = new QueryClient();
+export interface AppProps {
+  clientFactory?: (options: ChatimClientOptions) => ChatimClientAdapter;
+}
 
-export const App: React.FC = () => {
-  const [status] = useState<ConnectionStatus>("connecting");
+const Workspace: FC = () => {
+  const { session, logout } = useAuth();
+  const status = useConnectionStatus();
+
+  return (
+    <div className="flex min-h-screen flex-col bg-gray-50">
+      <ConnectionBanner status={status} />
+      <header className="flex items-center justify-between border-b bg-white px-6 py-4">
+        <h1 className="text-xl font-bold tracking-tight text-gray-900">
+          {UI_COPY.APP_TITLE}
+        </h1>
+        <div className="flex items-center gap-3 text-sm text-gray-700">
+          <span>{session?.displayName}</span>
+          <button
+            type="button"
+            onClick={logout}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+          >
+            {UI_COPY.AUTH.LOGOUT}
+          </button>
+        </div>
+      </header>
+    </div>
+  );
+};
+
+const AuthGate: FC<AppProps> = ({ clientFactory }) => {
+  const { session, getSubjectToken } = useAuth();
+
+  if (!session) {
+    return <LoginScreen />;
+  }
+
+  return (
+    <ChatimProvider
+      userId={session.userId}
+      activeRoomId={null}
+      getSubjectToken={getSubjectToken}
+      clientFactory={clientFactory}
+    >
+      <Workspace />
+    </ChatimProvider>
+  );
+};
+
+export const App: FC<AppProps> = ({ clientFactory }) => {
+  const [queryClient] = useState(createAppQueryClient);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen flex flex-col bg-gray-50">
-        <ConnectionBanner status={status} />
-        <header className="border-b bg-white px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-tight text-gray-900">
-            {UI_COPY.APP_TITLE}
-          </h1>
-          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-            SDK v{SDK_VERSION}
-          </span>
-        </header>
-        <main className="flex-1 p-6 max-w-4xl mx-auto w-full">
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-2">
-              Chào mừng bạn đến với chatim
-            </h2>
-            <p className="text-sm text-gray-600">
-              Hệ thống đã sẵn sàng cho Phase 2 (Luồng Chat & Kết nối Realtime).
-            </p>
-          </div>
-        </main>
-      </div>
+      <AuthProvider onSessionCleared={() => queryClient.clear()}>
+        <AuthGate clientFactory={clientFactory} />
+      </AuthProvider>
     </QueryClientProvider>
   );
 };
