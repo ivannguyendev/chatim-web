@@ -50,7 +50,7 @@ Chạy được với server `chatim` thật: đăng nhập dev bằng nút bấ
 
 | # | Tiêu chí | Kết quả |
 | :--- | :--- | :--- |
-| 1 | lint, typecheck, test, build xanh | `pnpm lint` 0 · SDK tsc/build 0 · web typecheck 0 · `pnpm build` 0 · **SDK 68/68, web 46/46**, không flaky |
+| 1 | lint, typecheck, test, build xanh | `pnpm lint` 0 · SDK tsc/build 0 · web typecheck 0 · `pnpm build` 0 · **SDK 76/76, web 46/46**, không flaky |
 | 2 | Mỗi luật có test riêng (fake socket, fake timers), viết test trước | Đạt; mỗi test mới được xác nhận fail trước khi code |
 | 3 | Với server thật: Lan và Alice nhận `ready` | Đạt bằng script dùng chính SDK (`ready` 157ms / 23ms, id Base62 đúng dạng, `ListMyRooms` OK, tên hiển thị đúng). Bấm nút trên trình duyệt: owner tự xem |
 | 4 | `apps/web/dist` không chứa `__dev` hay khoá | `grep -rl "__dev\|PRIVATE KEY" apps/web/dist` → không có |
@@ -73,13 +73,15 @@ Middleware trên dev server thật: GET local 200, Host lạ 403, POST 405.
 | 12 | App vẫn truyền `session.userId`; đổi sang `getMyUserId()` ở P3 | Đúng phạm vi |
 | 14 | Gửi lại `open_room` khi `resync` | Owner chốt 2026-11-25 |
 | 15 | Sửa thêm từ review và server thật: bỏ kết quả token cũ sau `close()`; cô lập handler; `connect()` huỷ lần nối lại đang chờ; typing/`close_room` chỉ gửi khi đang chạy (F09:237); `TokenManager` bỏ kết quả đổi token về sau khi đã huỷ (trước đây tự gia hạn mãi); `AuthProvider` bỏ token của phiên đã đổi; throttle chịu được lỗi ném đồng bộ; `markReadIntervalMs` chặn `NaN`; `getMyProfile` bóc `{profile}` (trước trả sai dạng) | Lỗi thật, mỗi lỗi có test fail trước |
+| 16 | Review tổng: đóng 4001 → đổi token mới rồi mới nối lại (trước dùng lại token cũ, lặp liên tục); gia hạn lỗi → bỏ token đã lưu; 4001 lặp lại → chờ 1s, 2s, 4s… ≤ 60s; `connect()` khi còn socket cũ thì đóng, dọn timer và báo `disconnected` để huỷ lệnh đang chờ | §5 (F09:492); tránh dồn vào identity khi token liên tục bị từ chối |
 
 ---
 
 ## 7. Đã biết, chưa xử lý
 
 - `auth_required` chưa được transport xử lý (trạng thái vẫn `running`).
-- `MarkUnread` chưa có; throttle không bỏ seq ≤ seq đã gửi; `markRead` ngay sau `closeRoom` được gửi ngay.
+- `MarkUnread` chưa có; throttle không bỏ seq ≤ seq đã gửi; `markRead` ngay sau `closeRoom` được gửi ngay; `markRead` lúc chưa kết nối bị bỏ, không gửi lại sau `ready` (UI gọi lại khi đang xem phòng).
+- `client.close()` là vĩnh viễn (token manager bị huỷ): muốn dùng lại thì tạo client mới, như web đang làm.
 - **P3 phải sửa trước khi UI gửi tin:** adapter web khai `sendMessage(): void` nên Promise bị bỏ (lỗi thành unhandled rejection).
 - `dist` của SDK dùng import không đuôi: chỉ dùng qua bundler, Node chạy thẳng không được (có từ P2).
 - Typecheck SDK không kiểm file test; `connect()` lỗi tạo socket thì trạng thái vẫn `connecting` (có từ trước).
