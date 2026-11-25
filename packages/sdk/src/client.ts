@@ -72,6 +72,7 @@ export class ChatimClient {
     this.wsTransport = new WebSocketTransport({
       wsUrl: this.config.wsUrl,
       getToken: () => this.tokenManager.getToken(),
+      refreshToken: () => this.tokenManager.refreshToken(),
       heartbeatIntervalMs: this.config.heartbeatIntervalMs,
       webSocketFactory: options.webSocketFactory,
     });

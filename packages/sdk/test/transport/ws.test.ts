@@ -107,11 +107,15 @@ describe("WebSocketTransport", () => {
     return { getToken, pending };
   }
 
-  function setup(getToken: () => Promise<string> = async () => "token-123") {
+  function setup(
+    getToken: () => Promise<string> = async () => "token-123",
+    refreshToken?: () => Promise<string>,
+  ) {
     const sockets: FakeWebSocket[] = [];
     const transport = new WebSocketTransport({
       wsUrl: "ws://localhost:8081/ws",
       getToken,
+      refreshToken,
       webSocketFactory: (url, proto) => {
         const ws = new FakeWebSocket(url, proto);
         sockets.push(ws);
@@ -401,6 +405,93 @@ describe("WebSocketTransport", () => {
     vi.advanceTimersByTime(3000);
 
     expect(sockets).toHaveLength(2);
+    transport.close();
+  });
+
+  it("exchanges a fresh token for the reconnect after close 4001", async () => {
+    const refreshToken = vi.fn(async () => "token-fresh");
+    const { transport, ws, sockets } = setup(
+      async () => "token-123",
+      refreshToken,
+    );
+    transport.connect();
+    ws().simulateOpen();
+    await flush();
+    ws().simulateClose(4001);
+    vi.advanceTimersByTime(0);
+    expect(sockets).toHaveLength(2);
+
+    ws().simulateOpen();
+    await flush();
+
+    expect(refreshToken).toHaveBeenCalledTimes(1);
+    expect(
+      fromBinary(ClientFrameSchema, ws().sentData[0] as Uint8Array).frame,
+    ).toMatchObject({ case: "auth", value: { token: "token-fresh" } });
+    transport.close();
+  });
+
+  it("keeps exchanging a fresh token after close 4001 until one succeeds", async () => {
+    const getToken = vi.fn(async () => "token-123");
+    const refreshToken = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error("identity unavailable"))
+      .mockResolvedValueOnce("token-fresh");
+    const { transport, ws, sockets } = setup(getToken, refreshToken);
+    transport.connect();
+    ws().simulateOpen();
+    await flush();
+    ws().simulateClose(4001);
+    vi.advanceTimersByTime(0);
+    ws().simulateOpen();
+    await flush();
+
+    vi.advanceTimersByTime(2000);
+    expect(sockets).toHaveLength(3);
+    ws().simulateOpen();
+    await flush();
+
+    expect(getToken).toHaveBeenCalledTimes(1);
+    expect(refreshToken).toHaveBeenCalledTimes(2);
+    expect(
+      fromBinary(ClientFrameSchema, ws().sentData[0] as Uint8Array).frame,
+    ).toMatchObject({ case: "auth", value: { token: "token-fresh" } });
+    transport.close();
+  });
+
+  it("closes the previous socket and its timers when connect is called again", async () => {
+    const { transport, ws, receive, sockets } = setup();
+    const onFrame = vi.fn();
+    transport.onFrame(onFrame);
+    transport.connect();
+    const first = ws();
+    first.simulateOpen();
+    await flush();
+    receive({ frame: { case: "loadFailed", value: { retryAfterMs: 2000 } } });
+    receive({ frame: { case: "retryLater", value: { retryAfterMs: 100 } } });
+    onFrame.mockClear();
+
+    transport.connect();
+
+    expect(sockets).toHaveLength(2);
+    expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(vi.getTimerCount()).toBe(0);
+
+    first.simulateMessage(
+      toBinary(
+        ServerFrameSchema,
+        create(ServerFrameSchema, { frame: { case: "ready", value: {} } }),
+      ) as unknown as ArrayBuffer,
+    );
+    first.simulateClose(1006);
+    vi.advanceTimersByTime(60000);
+
+    expect(sockets).toHaveLength(2);
+    expect(onFrame).not.toHaveBeenCalled();
+    expect(transport.status).toBe("connecting");
+    ws().simulateOpen();
+    await flush();
+    expect(transport.status).toBe("waiting_auth");
     transport.close();
   });
 });

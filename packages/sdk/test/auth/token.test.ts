@@ -141,4 +141,32 @@ describe("TokenManager", () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(renewListener).not.toHaveBeenCalled();
   });
+
+  it("exchanges again on the next getToken after a scheduled renew fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: "token-1", expires_in: 300 }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: "token-3", expires_in: 300 }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tm = new TokenManager({
+      identityUrl: "http://localhost:8084",
+      getSubjectToken: async () => "tenant-jwt",
+    });
+
+    await tm.getToken();
+    await vi.advanceTimersByTimeAsync(260 * 1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await expect(tm.getToken()).resolves.toBe("token-3");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    tm.destroy();
+  });
 });

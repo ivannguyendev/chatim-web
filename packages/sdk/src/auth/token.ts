@@ -102,7 +102,11 @@ export class TokenManager {
       if (this.destroyed) {
         return;
       }
-      this.refreshToken().catch(() => {});
+      this.refreshToken().catch(() => {
+        if (!this.destroyed) {
+          this.currentToken = null;
+        }
+      });
     }, renewDelayMs);
   }
 
