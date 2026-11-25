@@ -148,11 +148,16 @@ export function AuthProvider({
     if (customTokenRef.current) {
       return customTokenRef.current;
     }
-    if (import.meta.env.DEV && !isProduction && sessionRef.current) {
-      return fetchDevSubjectToken(
-        sessionRef.current.userId,
-        sessionRef.current.displayName,
+    const session = sessionRef.current;
+    if (import.meta.env.DEV && !isProduction && session) {
+      const token = await fetchDevSubjectToken(
+        session.userId,
+        session.displayName,
       );
+      if (sessionRef.current?.userId !== session.userId) {
+        throw new Error("Session changed during token fetch");
+      }
+      return token;
     }
     throw new Error("No active subject token");
   }, [isProduction]);

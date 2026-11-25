@@ -368,4 +368,38 @@ describe("features/auth", () => {
       /\(503\).*pnpm dev:issuer/,
     );
   });
+
+  it("rejects a dev token fetched for a session that changed before the fetch resolved", async () => {
+    let resolveFetch: (body: string) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = (body) =>
+              resolve({ ok: true, status: 200, text: async () => body });
+          }),
+      ),
+    );
+    let latestAuth: AuthContextValue | null = null;
+
+    render(
+      <AuthProvider isProduction={false}>
+        <AuthHarness
+          onReady={(auth) => {
+            latestAuth = auth;
+          }}
+        />
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Lan Nguyễn" }));
+
+    const pending = latestAuth!.getSubjectToken();
+    act(() => {
+      latestAuth!.loginAsDev({ userId: "alice", displayName: "Alice Trần" });
+    });
+    resolveFetch("lan.signed.jwt");
+
+    await expect(pending).rejects.toThrow("Session changed during token fetch");
+  });
 });
