@@ -72,7 +72,13 @@ export class MarkReadThrottle {
   }
 
   private dispatch(roomId: string, seq: number): void {
-    const request = this.sendMarkRead(roomId, seq).catch(() => undefined);
+    let sent: Promise<unknown>;
+    try {
+      sent = this.sendMarkRead(roomId, seq);
+    } catch (error) {
+      sent = Promise.reject(error);
+    }
+    const request = sent.catch(() => undefined);
     this.inFlight.add(request);
     void request.finally(() => this.inFlight.delete(request));
   }

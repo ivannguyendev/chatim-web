@@ -112,6 +112,31 @@ describe("MarkReadThrottle", () => {
     throttle.dispose();
   });
 
+  it("keeps a room alive when send throws synchronously on the timer path", () => {
+    const send = vi
+      .fn<(roomId: string, seq: number) => Promise<unknown>>()
+      .mockImplementation(async () => undefined)
+      .mockImplementationOnce(async () => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error("not_connected");
+      });
+    const throttle = new MarkReadThrottle(1000, send);
+
+    throttle.mark(KHO_HCM, 144);
+    expect(send).toHaveBeenLastCalledWith(KHO_HCM, 144);
+    throttle.mark(KHO_HCM, 146);
+
+    vi.advanceTimersByTime(1000);
+    expect(send).toHaveBeenLastCalledWith(KHO_HCM, 146);
+
+    vi.advanceTimersByTime(1000);
+    throttle.mark(KHO_HCM, 150);
+
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenLastCalledWith(KHO_HCM, 150);
+    throttle.dispose();
+  });
+
   it("dispose clears every timer", () => {
     const throttle = new MarkReadThrottle(1000, async () => undefined);
     throttle.mark(KHO_HCM, 144);
